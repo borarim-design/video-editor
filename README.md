@@ -89,7 +89,8 @@
 
 ```
 video-editor/
-├─ .github/workflows/deploy.yml  # main push → GitHub Pages 자동 배포
+├─ deploy-gh-pages.sh        # dist → gh-pages 브랜치 배포 스크립트
+├─ .github-pages-workflow.yml.example  # (선택) Actions 자동 배포 워크플로우 예시
 ├─ Dockerfile                 # 멀티스테이지: 프론트 빌드 → FastAPI 정적 서빙
 ├─ .dockerignore / .gitignore
 ├─ backend/                   # (선택) 서버 모드 — 정적 모드에서는 사용하지 않음
@@ -167,8 +168,9 @@ npm run check:static   # base 경로·폰트 21개·/api 호출 없음 검사
 npm run smoke          # SSR 렌더 스모크
 npx vite preview       # http://localhost:4173/video-editor/
 ```
-- `main` 브랜치에 푸시하면 [`.github/workflows/deploy.yml`](.github/workflows/deploy.yml) 이 `npm ci && npm run build` 후 Pages 로 배포합니다.
-- 최초 1회만 저장소 **Settings → Pages → Build and deployment → Source: GitHub Actions** 로 지정하면 됩니다.
+- 배포: `bash deploy-gh-pages.sh` — `frontend/dist` 산출물만 **`gh-pages` 브랜치 루트**로 푸시합니다(`main` 소스 브랜치는 그대로).
+- 저장소 **Settings → Pages → Build and deployment → Source: Deploy from a branch → `gh-pages` / (root)** 로 한 번 지정하면 열립니다.
+- (선택) 푸시할 때마다 자동 배포하려면 GitHub App 에 `Workflows` 권한을 준 뒤 [`.github-pages-workflow.yml.example`](.github-pages-workflow.yml.example) 을 `.github/workflows/deploy.yml` 로 옮기고 Pages 소스를 **GitHub Actions** 로 바꾸면 됩니다.
 - 주소: https://borarim-design.github.io/video-editor/ · 다른 경로에 올릴 때는 `VITE_BASE_PATH` 로 base 를 바꿉니다.
 
 ### 1) Docker (서버 모드 — AI 자막·자동 추적까지)
