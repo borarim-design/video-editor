@@ -382,7 +382,7 @@ export const DEFAULT_OVERLAYS: OverlayState = {
     rating: 4.5,
     reviews: '63,602',
     duration: '1시간 35분',
-    status: '영업 중 · 오후 10:00에 영업 종로',
+    status: '영업 중 · 오후 10:00에 영업 종료',
     x: 0.5,
     y: 0.74,
     scale: 1,

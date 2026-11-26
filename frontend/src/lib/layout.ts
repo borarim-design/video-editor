@@ -449,7 +449,9 @@ export function computeHookLayout(
   const pillPad = subPx * 0.75;
   const pillGap = subPx * 0.34;
   const widths = subs.map((s) => measureSub(s));
-  const pillW = widths.length ? Math.max(...widths) + pillPad * 2 : 0;
+  // 알약은 각자 문구 폭에 맞춘다(1개일 때는 예전과 완전히 같은 값).
+  const pillWidths = widths.map((w) => w + pillPad * 2);
+  const pillW = pillWidths.length ? Math.max(...pillWidths) : 0;
   const gap = hasPill ? subPx * 0.6 : 0;
   const pillBlockH = hasPill ? subs.length * pillH + (subs.length - 1) * pillGap : 0;
 
@@ -458,9 +460,9 @@ export function computeHookLayout(
   const top = (canvasH * hook.yPercent) / 100 - blockH / 2;
 
   const pills: HookPill[] = subs.map((text, i) => ({
-    x: (canvasW - pillW) / 2,
+    x: (canvasW - pillWidths[i]) / 2,
     y: top + i * (pillH + pillGap),
-    w: pillW,
+    w: pillWidths[i],
     h: pillH,
     text,
   }));
