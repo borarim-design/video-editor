@@ -394,9 +394,9 @@ export default function App() {
 
       <main className="flex flex-1 flex-col lg:min-h-0 lg:flex-row">
         <section className="flex flex-col lg:min-h-0 lg:flex-1">
-          <div className="flex items-center gap-2 overflow-x-auto border-b border-studio-700/50 px-3 py-2 sm:px-4">
+          <div className="flex flex-wrap items-center gap-x-2 gap-y-1.5 border-b border-studio-700/50 px-3 py-2 sm:px-4">
             <span className="label shrink-0">비율</span>
-            <div className="flex gap-1.5">
+            <div className="flex flex-wrap gap-1.5">
               {ASPECTS.map((a) => (
                 <button
                   key={a.id}

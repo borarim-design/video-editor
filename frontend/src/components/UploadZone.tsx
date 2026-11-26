@@ -67,7 +67,7 @@ export default function UploadZone({ onFile, busy, error }: Props) {
           {[
             ['✨', '단어 하이라이트 자막', '수동 자막에 단어 강조·바운스·박스·지글지글'],
             ['🫥', '수동 모자이크', '드래그로 영역 지정, 블러↔모자이크 강도 조절'],
-            ['📱', '릴스·숏츠 비율', '9:16 · 1:1 · 16:9 · 4:5 로 바로 내보내기'],
+            ['📱', '릴스·숏츠 비율', '9:16 · 1:1 · 16:9 · 4:5 · 3:4 로 바로 내보내기'],
           ].map(([emoji, title, desc]) => (
             <div key={title} className="rounded-2xl border border-studio-700/70 bg-studio-850/50 p-4">
               <div className="text-lg">{emoji}</div>
@@ -79,7 +79,7 @@ export default function UploadZone({ onFile, busy, error }: Props) {
 
         <p className="mt-6 rounded-xl border border-studio-700/60 bg-studio-850/40 px-4 py-3 text-[11px] leading-relaxed text-studio-400">
           지금은 <b className="text-studio-200">서버 없는 정적 버전</b>이라 <b className="text-studio-200">AI 자동 자막</b>과
-          <b className="text-studio-200"> 자동 얼굴 추적</b>은 꺼져 있습니다. 수동 자막·수동 모자이크·트림·비율·후킹 타이틀은
+          <b className="text-studio-200"> 자동 얼굴 추적</b>은 꺼져 있습니다. 수동 자막·수동 모자이크·트림·비율·후킹 타이틀·사진 스티커·오버레이 위젯은
           모두 그대로 동작하고, 영상은 이 브라우저 안에서만 만들어집니다.
         </p>
       </div>
