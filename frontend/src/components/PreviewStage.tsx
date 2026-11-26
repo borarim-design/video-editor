@@ -1,8 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { PointerEvent as ReactPointerEvent, RefObject } from 'react';
-import type { EditSpec, HookTitle, PersonTrack, ProjectMeta, SubtitleState, MaskState } from '../types';
+import type {
+  EditSpec, HookTitle, ImageSticker, OverlayState, PersonTrack, ProjectMeta, SubtitleState, MaskState,
+} from '../types';
 import { outputGeometry } from '../lib/layout';
 import { drawPreview, toSourceNorm } from '../lib/preview';
+import { onStickerImageLoaded, stickerHitTest } from '../lib/stickers';
 import { formatTime } from '../lib/format';
 
 interface Props {
@@ -15,10 +18,15 @@ interface Props {
   hook: HookTitle;
   masks: MaskState;
   tracks: PersonTrack[];
+  stickers: ImageSticker[];
+  overlays: OverlayState;
+  selectedStickerId: string | null;
   fontsTick: number;
   drawMode: boolean;
   onAddManual: (rect: { x: number; y: number; w: number; h: number }) => void;
   onDrawModeChange: (v: boolean) => void;
+  onSelectSticker: (id: string | null) => void;
+  onMoveSticker: (id: string, patch: { x: number; y: number }) => void;
 }
 
 interface Rect {
@@ -38,16 +46,24 @@ export default function PreviewStage({
   hook,
   masks,
   tracks,
+  stickers,
+  overlays,
+  selectedStickerId,
   fontsTick,
   drawMode,
   onAddManual,
   onDrawModeChange,
+  onSelectSticker,
+  onMoveSticker,
 }: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const wrapRef = useRef<HTMLDivElement>(null);
   const [drag, setDrag] = useState<Rect | null>(null);
   const [seekTick, setSeekTick] = useState(0);
+  const [painted, setPainted] = useState(false);
+  const [videoError, setVideoError] = useState<string | null>(null);
   const dragStart = useRef<{ x: number; y: number } | null>(null);
+  const stickerDrag = useRef<{ id: string; dx: number; dy: number } | null>(null);
 
   const geo = useMemo(() => outputGeometry(project.width, project.height, aspect), [project, aspect]);
   const tTimeline = Math.max(0, Math.min(time - trim.start, Math.max(0.001, trim.end - trim.start)));
@@ -58,6 +74,8 @@ export default function PreviewStage({
       aspect,
       subtitles: { enabled: subtitles.enabled, cues: subtitles.cues, style: subtitles.style },
       hook,
+      stickers,
+      overlays,
       masks: {
         enabled: masks.enabled,
         mode: masks.mode,
@@ -68,13 +86,13 @@ export default function PreviewStage({
         manual: masks.manual,
       },
     }),
-    [trim, aspect, subtitles, hook, masks],
+    [trim, aspect, subtitles, hook, stickers, overlays, masks],
   );
 
   const render = useCallback(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
-    drawPreview({
+    const drew = drawPreview({
       canvas,
       video: videoRef.current,
       projectWidth: project.width,
@@ -84,24 +102,76 @@ export default function PreviewStage({
       t: tTimeline,
       tSource: time,
       dragBox: drag,
+      selectedStickerId,
     });
-  }, [project, spec, tracks, tTimeline, time, drag, videoRef]);
+    setPainted((prev) => (prev === drew ? prev : drew));
+  }, [project, spec, tracks, tTimeline, time, drag, videoRef, selectedStickerId]);
 
   useEffect(() => {
     render();
   }, [render, fontsTick, seekTick]);
 
+  // iOS Safari 는 currentTime 0 프레임을 디코딩하지 않는 경우가 있어
+  // 메타데이터가 오면 아주 살짝 seek 해서 첫 프레임을 강제로 만든다.
   useEffect(() => {
     const video = videoRef.current;
     if (!video) return;
-    const onSeeked = () => setSeekTick((v) => v + 1);
-    video.addEventListener('seeked', onSeeked);
-    video.addEventListener('loadeddata', onSeeked);
+    setVideoError(null);
+    setPainted(false);
+    // iOS Safari 인라인 재생 속성(React 가 모르는 attribute 는 직접 지정)
+    ['playsinline', 'webkit-playsinline', 'x5-playsinline', 'disablepictureinpicture'].forEach((name) => {
+      video.setAttribute(name, 'true');
+    });
+
+    const bump = () => setSeekTick((v) => v + 1);
+    const kickFirstFrame = () => {
+      if (!video.videoWidth || !video.videoHeight) return;
+      try {
+        if (Math.abs(video.currentTime) < 0.001) video.currentTime = 0.04;
+      } catch {
+        /* ignore */
+      }
+      bump();
+    };
+    const onLoadedMeta = () => {
+      kickFirstFrame();
+      if (!video.videoWidth || !video.videoHeight) {
+        setVideoError(
+          '영상 해상도를 읽지 못했어요. 아이폰에서 찍은 .mov(HEVC)는 브라우저가 디코딩하지 못할 수 있습니다. MP4(H.264)로 변환해 주세요.',
+        );
+      }
+    };
+    const onError = () => {
+      const code = video.error?.code;
+      setVideoError(
+        code === 4
+          ? '브라우저가 이 영상 코덱을 지원하지 않습니다. 아이폰 HEVC .mov는 MP4(H.264)로 변환해 주세요.'
+          : '영상을 재생하지 못했습니다. 파일을 다시 선택하거나 MP4(H.264)로 변환해 주세요.',
+      );
+    };
+    const events: [string, () => void][] = [
+      ['loadedmetadata', onLoadedMeta],
+      ['loadeddata', kickFirstFrame],
+      ['canplay', kickFirstFrame],
+      ['canplaythrough', kickFirstFrame],
+      ['seeked', bump],
+      ['playing', bump],
+      ['error', onError],
+    ];
+    events.forEach(([name, fn]) => video.addEventListener(name, fn));
+    // 이벤트가 늦게 오는 기기에서도 첫 프레임을 여러 번 시도한다.
+    const retries = [120, 400, 900, 1800].map((ms) => window.setTimeout(kickFirstFrame, ms));
     return () => {
-      video.removeEventListener('seeked', onSeeked);
-      video.removeEventListener('loadeddata', onSeeked);
+      events.forEach(([name, fn]) => video.removeEventListener(name, fn));
+      retries.forEach((id) => window.clearTimeout(id));
     };
   }, [videoRef, project.id]);
+
+  // 스티커 이미지가 늦게 디코딩되면 한 번 더 그린다.
+  useEffect(() => {
+    onStickerImageLoaded(() => setSeekTick((v) => v + 1));
+    return () => onStickerImageLoaded(null);
+  }, []);
 
   const pointToCanvas = (e: ReactPointerEvent) => {
     const canvas = canvasRef.current;
@@ -114,14 +184,42 @@ export default function PreviewStage({
   };
 
   const onPointerDown = (e: ReactPointerEvent) => {
-    if (!drawMode) return;
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    if (drawMode) {
+      const p = pointToCanvas(e);
+      dragStart.current = p;
+      setDrag({ x: p.x, y: p.y, w: 0, h: 0 });
+      (e.target as HTMLElement).setPointerCapture(e.pointerId);
+      return;
+    }
+    // 스티커 드래그 — 가장 위에 있는 스티커부터 잡는다.
     const p = pointToCanvas(e);
-    dragStart.current = p;
-    setDrag({ x: p.x, y: p.y, w: 0, h: 0 });
-    (e.target as HTMLElement).setPointerCapture(e.pointerId);
+    const hit = stickerHitTest(stickers, canvas.width, canvas.height, p.x, p.y);
+    if (hit) {
+      const st = stickers.find((s) => s.id === hit);
+      if (st) {
+        stickerDrag.current = { id: hit, dx: p.x - st.x * canvas.width, dy: p.y - st.y * canvas.height };
+        onSelectSticker(hit);
+        (e.target as HTMLElement).setPointerCapture(e.pointerId);
+      }
+    } else if (selectedStickerId) {
+      onSelectSticker(null);
+    }
   };
 
   const onPointerMove = (e: ReactPointerEvent) => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    if (stickerDrag.current) {
+      const p = pointToCanvas(e);
+      const { id, dx, dy } = stickerDrag.current;
+      onMoveSticker(id, {
+        x: Math.max(-0.1, Math.min(1.1, (p.x - dx) / canvas.width)),
+        y: Math.max(-0.1, Math.min(1.1, (p.y - dy) / canvas.height)),
+      });
+      return;
+    }
     if (!dragStart.current) return;
     const p = pointToCanvas(e);
     const s = dragStart.current;
@@ -129,6 +227,10 @@ export default function PreviewStage({
   };
 
   const onPointerUp = (e: ReactPointerEvent) => {
+    if (stickerDrag.current) {
+      stickerDrag.current = null;
+      return;
+    }
     if (!dragStart.current || !drag) {
       dragStart.current = null;
       return;
@@ -150,10 +252,11 @@ export default function PreviewStage({
   };
 
   const activeTracks = masks.tracks.filter((t) => t.enabled).length;
+  const stickerCount = stickers.filter((s) => s.enabled).length;
 
   return (
-    <div className="relative flex h-full min-h-0 flex-col">
-      <div className="flex min-h-0 flex-1 items-center justify-center overflow-hidden p-2 sm:p-4">
+    <div className="relative flex flex-col lg:h-full lg:min-h-0">
+      <div className="flex items-center justify-center p-2 sm:p-4 lg:min-h-0 lg:flex-1 lg:overflow-hidden">
         <div
           ref={wrapRef}
           className="relative max-h-full"
@@ -163,21 +266,31 @@ export default function PreviewStage({
             className="relative h-full w-full overflow-hidden rounded-xl border border-studio-700 bg-black shadow-[0_20px_60px_-20px_rgba(0,0,0,0.9)]"
             style={{ maxHeight: '100%' }}
           >
+            {/* iOS Safari 폴백: 캔버스가 아직 첫 프레임을 못 그렸을 때 영상 자체가 보인다. */}
             <video
               ref={videoRef}
               src={project.srcUrl}
               playsInline
               muted={false}
               preload="auto"
-              className="pointer-events-none absolute inset-0 h-full w-full object-contain opacity-0"
+              className="pointer-events-none absolute inset-0 h-full w-full object-contain"
             />
             <canvas
               ref={canvasRef}
               onPointerDown={onPointerDown}
               onPointerMove={onPointerMove}
               onPointerUp={onPointerUp}
-              className={`absolute inset-0 h-full w-full object-contain ${drawMode ? 'cursor-crosshair' : 'cursor-default'}`}
+              className={`absolute inset-0 h-full w-full object-contain transition-opacity ${
+                painted ? 'opacity-100' : 'opacity-0'
+              } ${drawMode ? 'cursor-crosshair' : stickerCount ? 'cursor-move' : 'cursor-default'}`}
             />
+            {videoError ? (
+              <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-studio-950/90 px-6 text-center">
+                <span className="text-2xl">🎬</span>
+                <p className="text-xs font-bold text-studio-100">미리보기를 표시할 수 없어요</p>
+                <p className="text-[11px] leading-relaxed text-studio-400">{videoError}</p>
+              </div>
+            ) : null}
             <div className="pointer-events-none absolute left-2 top-2 flex flex-wrap gap-1.5">
               <span className="rounded-md bg-black/60 px-1.5 py-0.5 text-[10px] font-semibold tabular-nums text-white/80 backdrop-blur">
                 {geo.outW}×{geo.outH}
@@ -185,8 +298,11 @@ export default function PreviewStage({
               {subtitles.enabled && subtitles.cues.length > 0 ? (
                 <span className="rounded-md bg-neon/80 px-1.5 py-0.5 text-[10px] font-semibold text-white">자막 {subtitles.cues.length}</span>
               ) : null}
+              {stickerCount > 0 ? (
+                <span className="rounded-md bg-neon-cyan/80 px-1.5 py-0.5 text-[10px] font-semibold text-studio-900">스티커 {stickerCount}</span>
+              ) : null}
               {masks.enabled && activeTracks > 0 ? (
-                <span className="rounded-md bg-neon-cyan/80 px-1.5 py-0.5 text-[10px] font-semibold text-studio-900">모자이크 {activeTracks}명</span>
+                <span className="rounded-md bg-neon/80 px-1.5 py-0.5 text-[10px] font-semibold text-white">모자이크 {activeTracks}명</span>
               ) : null}
             </div>
             <div className="pointer-events-none absolute bottom-2 right-2 rounded-md bg-black/60 px-1.5 py-0.5 font-mono text-[10px] tabular-nums text-white/80 backdrop-blur">
@@ -196,6 +312,13 @@ export default function PreviewStage({
               <div className="pointer-events-none absolute inset-x-0 top-0 flex justify-center p-2">
                 <span className="rounded-full bg-neon-cyan px-3 py-1 text-[11px] font-bold text-studio-900 shadow">
                   미리보기에서 영역을 드래그하세요
+                </span>
+              </div>
+            ) : null}
+            {!drawMode && selectedStickerId ? (
+              <div className="pointer-events-none absolute inset-x-0 bottom-2 flex justify-center">
+                <span className="rounded-full bg-black/70 px-3 py-1 text-[10px] font-semibold text-white/90 backdrop-blur">
+                  스티커를 끌어서 위치를 옮길 수 있어요
                 </span>
               </div>
             ) : null}

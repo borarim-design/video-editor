@@ -263,6 +263,7 @@ const ASPECT_RATIO: Record<Aspect, number | null> = {
   '1:1': 1,
   '16:9': 16 / 9,
   '4:5': 4 / 5,
+  '3:4': 3 / 4,
 };
 
 const even = (v: number) => {
@@ -381,15 +382,35 @@ export interface HookLine {
   tokens: HookToken[];
 }
 
+export interface HookPill {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  text: string;
+}
+
 export interface HookLayout {
   fontPx: number;
   subPx: number;
   lines: HookLine[];
+  /** 첫 번째 알약(기존 호환) */
   pill: { x: number; y: number; w: number; h: number } | null;
+  /** 서브 문구를 `|` 로 나눈 알약들(최대 2개, 세로로 쌓임) */
+  pills: HookPill[];
   subBaseline: number;
   blockTop: number;
   blockHeight: number;
   box: { x: number; y: number; w: number; h: number } | null;
+}
+
+/** 서브 문구를 알약 단위로 나눈다 — `|` 또는 줄바꿈, 최대 2개 */
+export function splitSubText(subtext: string): string[] {
+  return subtext
+    .split(/[|\n]/)
+    .map((s) => s.trim())
+    .filter(Boolean)
+    .slice(0, 2);
 }
 
 /** backend/app/layout.py compute_hook_layout 와 동일 */
@@ -422,21 +443,30 @@ export function computeHookLayout(
     if (cur) texts.push(cur);
   });
 
-  const sub = hook.subtext.trim();
-  const hasPill = Boolean(sub);
+  const subs = splitSubText(hook.subtext);
+  const hasPill = subs.length > 0;
   const pillH = subPx * 1.55;
   const pillPad = subPx * 0.75;
-  const subW = hasPill ? measureSub(sub) : 0;
-  const pillW = subW + pillPad * 2;
+  const pillGap = subPx * 0.34;
+  const widths = subs.map((s) => measureSub(s));
+  const pillW = widths.length ? Math.max(...widths) + pillPad * 2 : 0;
   const gap = hasPill ? subPx * 0.6 : 0;
+  const pillBlockH = hasPill ? subs.length * pillH + (subs.length - 1) * pillGap : 0;
 
   const titleH = texts.length ? (texts.length - 1) * lineHeight + fontPx : 0;
-  const blockH = (hasPill ? pillH + gap : 0) + titleH;
+  const blockH = (hasPill ? pillBlockH + gap : 0) + titleH;
   const top = (canvasH * hook.yPercent) / 100 - blockH / 2;
 
-  const pill = hasPill ? { x: (canvasW - pillW) / 2, y: top, w: pillW, h: pillH } : null;
+  const pills: HookPill[] = subs.map((text, i) => ({
+    x: (canvasW - pillW) / 2,
+    y: top + i * (pillH + pillGap),
+    w: pillW,
+    h: pillH,
+    text,
+  }));
+  const pill = pills.length ? { x: pills[0].x, y: pills[0].y, w: pills[0].w, h: pills[0].h } : null;
   const subBaseline = top + pillH / 2 + subPx * 0.35;
-  const titleTop = top + (hasPill ? pillH + gap : 0);
+  const titleTop = top + (hasPill ? pillBlockH + gap : 0);
 
   const spacePx = fontPx * SPACE_ADVANCE;
   const lines: HookLine[] = texts.map((text, i) => {
@@ -466,7 +496,7 @@ export function computeHookLayout(
     box = { x: (canvasW - widest) / 2 - padX, y: top - padY, w: widest + padX * 2, h: blockH + padY * 2 };
   }
 
-  return { fontPx, subPx, lines, pill, subBaseline, blockTop: top, blockHeight: blockH, box };
+  return { fontPx, subPx, lines, pill, pills, subBaseline, blockTop: top, blockHeight: blockH, box };
 }
 
 /** backend/app/layout.py speed_line_polys 와 동일 */

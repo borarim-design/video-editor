@@ -10,6 +10,7 @@
  */
 import type { EditSpec, ExportResult, PersonTrack } from '../types';
 import { drawPreview } from './preview';
+import { preloadStickerImages } from './stickers';
 import { outputGeometry } from './layout';
 import { clamp } from './format';
 
@@ -156,6 +157,9 @@ export async function exportVideo(params: ExportParams): Promise<ExportResult> {
   if (!ctx) throw new Error('캔버스를 만들지 못했습니다.');
 
   await waitReady(video);
+
+  // 스티커 이미지가 디코딩되기 전에 녹화가 시작되면 빈 프레임이 찍히므로 먼저 불러온다.
+  await preloadStickerImages(spec.stickers ?? []);
 
   // ---- 오디오(Web Audio) ----
   const graph = hasAudio ? ensureAudioGraph(video) : null;

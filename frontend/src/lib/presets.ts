@@ -1,4 +1,7 @@
-import type { Cue, EditSpec, HookPreset, HookTitle, MaskState, SubtitleState, SubtitleStyle } from '../types';
+import type {
+  Cue, EditSpec, HookDecor, HookPreset, HookTitle, ImageSticker, MaskState, OverlayState,
+  SubtitleState, SubtitleStyle,
+} from '../types';
 
 /** 캔버스/백엔드 공통 자막 스타일 기본값 (backend/app/models.py SubtitleStyle 과 동일) */
 export const DEFAULT_STYLE: SubtitleStyle = {
@@ -22,6 +25,20 @@ export const DEFAULT_STYLE: SubtitleStyle = {
   wobble: 0,
   highlightScale: 1.12,
   letterSpacing: 0,
+};
+
+export const DEFAULT_DECOR: HookDecor = {
+  bars: false,
+  barShape: 'rounded',
+  barColors: ['#FFE9A0', '#FFFFFF', '#BFD9FF'],
+  barOpacity: 0.96,
+  barRadius: 0.26,
+  barPadX: 0.5,
+  barPadY: 0.3,
+  labelBox: false,
+  labelBoxColor: '#111111',
+  labelBoxTextColor: '#FFFFFF',
+  paperShadow: false,
 };
 
 export const DEFAULT_HOOK: HookTitle = {
@@ -57,7 +74,17 @@ export const DEFAULT_HOOK: HookTitle = {
     innerRadius: 0.62,
     seed: 7,
   },
+  decor: { ...DEFAULT_DECOR, barColors: [...DEFAULT_DECOR.barColors] },
 };
+
+/** hook.decor 가 없는 예전 스펙도 안전하게 그리기 위한 기본값 병합 */
+export function hookDecorOf(hook: HookTitle): HookDecor {
+  return {
+    ...DEFAULT_DECOR,
+    ...hook.decor,
+    barColors: hook.decor?.barColors?.length ? [...hook.decor.barColors] : [...DEFAULT_DECOR.barColors],
+  };
+}
 
 export interface HookPresetDef {
   id: HookPreset;
@@ -137,16 +164,93 @@ export const HOOK_PRESETS: HookPresetDef[] = [
       },
     },
   },
+  {
+    id: 'pastel-bars',
+    name: '형광펜 다중 바',
+    tagline: '줄마다 다른 파스텔·흰 테두리 바',
+    emoji: '🖍️',
+    sampleTitle: '팔로워가 적어서\n돈을 못 번다고요?',
+    sampleSub: '인스타 수익화 루틴',
+    style: {
+      yPercent: 46, fontSize: 6.4, subSize: 2.4, color: '#141414', accent: '#141414',
+      accentLine: 0, strokeWidth: 0, strokeColor: '#FFFFFF', skew: 0,
+      font: 'pretendard', weight: 'extrabold', lineHeight: 1.62,
+      pillColor: '#FFFFFF', pillOpacity: 0.94, subColor: '#111111', boxOpacity: 0,
+      decor: {
+        ...DEFAULT_DECOR,
+        bars: true, barShape: 'rounded', barColors: ['#FFE9A0', '#FFFFFF', '#BFD9FF'],
+        barOpacity: 0.97, barRadius: 0.2, barPadX: 0.55, barPadY: 0.3,
+      },
+    },
+  },
+  {
+    id: 'color-outline-badge',
+    name: '컬러 아웃라인 + 배지',
+    tagline: '파스텔 채우기 + 두꺼운 흰 외곽선 + 검정 라벨',
+    emoji: '🟩',
+    sampleTitle: '아이폰 카메라\n웜톤 설정법',
+    sampleSub: '푸른끼 빼주는',
+    style: {
+      yPercent: 38, fontSize: 7.2, subSize: 2.4, color: '#8CF0A2', accent: '#8CF0A2',
+      accentLine: 0, strokeColor: '#FFFFFF', strokeWidth: 0.26, skew: 0,
+      font: 'jua', weight: 'regular', lineHeight: 1.32,
+      pillColor: '#FFFFFF', pillOpacity: 0.95, subColor: '#111111', boxOpacity: 0,
+      decor: {
+        ...DEFAULT_DECOR,
+        labelBox: true, labelBoxColor: '#111111', labelBoxTextColor: '#FFFFFF',
+        barPadX: 0.42, barPadY: 0.5,
+      },
+    },
+  },
+  {
+    id: 'torn-paper',
+    name: '찢어진 종이 라벨',
+    tagline: '불규칙 종이 스티커 + 손글씨 + 흰 알약',
+    emoji: '📜',
+    sampleTitle: '망원동\n한바퀴',
+    sampleSub: '미감좋은 언니들 꼭 다 모였다',
+    style: {
+      yPercent: 58, fontSize: 6.2, subSize: 2.2, color: '#FFFFFF', accent: '#FFFFFF',
+      accentLine: 0, strokeColor: '#3A2A22', strokeWidth: 0.09, skew: -2.5,
+      font: 'nanumpen', weight: 'regular', lineHeight: 1.75,
+      pillColor: '#FFFFFF', pillOpacity: 0.93, subColor: '#2A2118', boxOpacity: 0,
+      decor: {
+        ...DEFAULT_DECOR,
+        bars: true, barShape: 'torn', barColors: ['#F6C3D2', '#EFE0C3', '#F6C3D2'],
+        barOpacity: 1, barPadX: 0.42, barPadY: 0.34, paperShadow: true,
+      },
+    },
+  },
+  {
+    id: 'travel-bracket',
+    name: '여행 포인트',
+    tagline: '반투명 흰 라벨 2개 + 민트 대괄호 타이틀',
+    emoji: '📍',
+    sampleTitle: '[남해] 여행 코스',
+    sampleSub: '한지 멋집부터|노출 카페까지',
+    style: {
+      yPercent: 62, fontSize: 6.0, subSize: 2.1, color: '#FFFFFF', accent: '#6BE8D8',
+      accentLine: 0, strokeColor: '#0E3B36', strokeWidth: 0.17, skew: 0,
+      font: 'pretendard', weight: 'extrabold', lineHeight: 1.3,
+      pillColor: '#FFFFFF', pillOpacity: 0.74, subColor: '#1B2A28', boxOpacity: 0,
+    },
+  },
 ];
 
 export function applyHookPreset(hook: HookTitle, preset: HookPreset): HookTitle {
   const def = HOOK_PRESETS.find((p) => p.id === preset);
   if (!def) return { ...hook, preset };
+  const decor = def.style.decor ?? hook.decor;
   return {
     ...hook,
     ...def.style,
     preset,
     speedLines: { ...(def.style.speedLines ?? hook.speedLines) },
+    decor: {
+      ...DEFAULT_DECOR,
+      ...decor,
+      barColors: decor?.barColors?.length ? [...decor.barColors] : [...DEFAULT_DECOR.barColors],
+    },
   };
 }
 
@@ -246,7 +350,79 @@ export const ASPECTS: { id: EditSpec['aspect']; name: string; hint: string }[] =
   { id: '1:1', name: '1:1', hint: '피드 정사각' },
   { id: '16:9', name: '16:9', hint: '유튜브 가로' },
   { id: '4:5', name: '4:5', hint: '인스타 세로 피드' },
+  { id: '3:4', name: '3:4', hint: '인스타 피드(카드뉴스)' },
 ];
+
+/** 오버레이 위젯 기본값 — 모두 꺼진 상태로 시작한다. */
+export const DEFAULT_OVERLAYS: OverlayState = {
+  viewfinder: {
+    enabled: false,
+    topLeft: 'Auto · HDR Off',
+    topRight: '4K',
+    bottomLabels: 'VIDEO|PHOTO|SQUARE|PANO',
+    color: '#FFFFFF',
+    opacity: 0.9,
+    bandOpacity: 0.35,
+  },
+  dateCard: {
+    enabled: false,
+    eyebrow: 'view of today',
+    weekday: 'SUN',
+    day: '22',
+    monthYear: 'NOV 2026',
+    x: 0.5,
+    y: 0.3,
+    scale: 1,
+    rotation: 0,
+  },
+  placeCard: {
+    enabled: false,
+    title: '교토 여행',
+    rating: 4.5,
+    reviews: '63,602',
+    duration: '1시간 35분',
+    status: '영업 중 · 오후 10:00에 영업 종로',
+    x: 0.5,
+    y: 0.74,
+    scale: 1,
+    accent: '#2BB7A8',
+  },
+};
+
+/** 사진 스티커 기본값 */
+export const STICKER_FRAMES: { id: ImageSticker['frame']; name: string; hint: string }[] = [
+  { id: 'dashed', name: '점선 흰 테두리', hint: '레퍼런스의 점선 박스' },
+  { id: 'polaroid', name: '폴라로이드', hint: '흰 종이 프레임' },
+  { id: 'rounded', name: '둥근 모서리', hint: '부드러운 라운드' },
+  { id: 'none', name: '테두리 없음', hint: '사진만' },
+];
+
+export const STICKER_WIDTHS = { min: 0.12, max: 0.72 } as const;
+
+export function newSticker(
+  id: string,
+  name: string,
+  src: string,
+  index = 0,
+): ImageSticker {
+  // 여러 장이면 서로 겹치지 않게 계단식으로 놓는다.
+  const offset = (index % 3) * 0.1;
+  return {
+    id,
+    name,
+    src,
+    x: 0.27 + offset,
+    y: 0.27 + offset,
+    width: 0.3,
+    rotation: index % 2 === 0 ? -3 : 3,
+    frame: 'dashed',
+    frameColor: '#FFFFFF',
+    opacity: 1,
+    start: null,
+    end: null,
+    enabled: true,
+  };
+}
 
 export function buildSpec(
   trim: { start: number; end: number },
@@ -254,6 +430,8 @@ export function buildSpec(
   subtitles: SubtitleState,
   masks: MaskState,
   hook: HookTitle,
+  stickers: ImageSticker[] = [],
+  overlays: OverlayState = DEFAULT_OVERLAYS,
 ): EditSpec {
   return {
     trim: { start: trim.start, end: trim.end },
@@ -264,6 +442,8 @@ export function buildSpec(
       style: subtitles.style,
     },
     hook,
+    stickers,
+    overlays,
     masks: {
       enabled: masks.enabled,
       mode: masks.mode,

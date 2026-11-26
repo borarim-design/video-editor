@@ -14,7 +14,7 @@ export interface Cue {
 }
 
 export type Preset = 'highlight' | 'bounce' | 'box' | 'outline' | 'jiggle' | 'plain';
-export type Aspect = 'original' | '9:16' | '1:1' | '16:9' | '4:5';
+export type Aspect = 'original' | '9:16' | '1:1' | '16:9' | '4:5' | '3:4';
 export type MaskMode = 'blur' | 'pixelate';
 export type MaskShape = 'rect' | 'ellipse' | 'circle';
 
@@ -112,7 +112,41 @@ export interface SpeedLines {
   seed: number;
 }
 
-export type HookPreset = 'reviewming' | 'vlog' | 'blackbox' | 'badge' | 'plain';
+export type HookPreset =
+  | 'reviewming'
+  | 'vlog'
+  | 'blackbox'
+  | 'badge'
+  | 'pastel-bars'
+  | 'color-outline-badge'
+  | 'torn-paper'
+  | 'travel-bracket'
+  | 'plain';
+
+/** 줄 배경 바 모양 — 둥근 형광펜 바 / 찢어진 종이 조각 */
+export type BarShape = 'rounded' | 'torn';
+
+/**
+ * 후킹 타이틀 장식(레퍼런스 템플릿 반영).
+ * 캔버스와 내보내기가 같은 값을 보도록 순수 데이터로만 둔다.
+ */
+export interface HookDecor {
+  /** 줄마다 색이 다른 배경 바 */
+  bars: boolean;
+  barShape: BarShape;
+  /** 줄 순서대로 돌려 쓰는 바 색 (#RRGGBB) */
+  barColors: string[];
+  barOpacity: number;
+  barRadius: number;
+  barPadX: number;
+  barPadY: number;
+  /** 마지막 줄을 검정/컬러 라벨 박스로 */
+  labelBox: boolean;
+  labelBoxColor: string;
+  labelBoxTextColor: string;
+  /** 종이 바에 옅은 그림자 */
+  paperShadow: boolean;
+}
 
 /** 릴스 상단 후킹 타이틀(오프닝/고정 헤드라인) */
 export interface HookTitle {
@@ -141,6 +175,77 @@ export interface HookTitle {
   weight: string;
   lineHeight: number;
   speedLines: SpeedLines;
+  /** 레퍼런스 장식(바·라벨 박스). 없으면 장식 없음으로 본다. */
+  decor?: HookDecor;
+}
+
+/** 사진 스티커(PiP) 테두리 스타일 */
+export type StickerFrame = 'none' | 'dashed' | 'polaroid' | 'rounded';
+
+/** 영상 위에 얹는 추가 이미지 — 위치·크기·회전·테두리 */
+export interface ImageSticker {
+  id: string;
+  name: string;
+  /** blob: 또는 data: URL */
+  src: string;
+  /** 출력 캔버스 기준 중심 좌표(0~1) */
+  x: number;
+  y: number;
+  /** 출력 캔버스 너비 대비 크기(0~1) */
+  width: number;
+  /** 기울기(도) */
+  rotation: number;
+  frame: StickerFrame;
+  frameColor: string;
+  opacity: number;
+  /** 표시 구간(편집본 기준 초). null 이면 전체 */
+  start: number | null;
+  end: number | null;
+  enabled: boolean;
+}
+
+/** 카메라 뷰파인더 프레임 (Auto · HDR Off + 3×3 그리드 + 셔터) */
+export interface ViewfinderOverlay {
+  enabled: boolean;
+  topLeft: string;
+  topRight: string;
+  bottomLabels: string;
+  color: string;
+  opacity: number;
+  bandOpacity: number;
+}
+
+/** 날짜 스탬프 카드 (view of today / SUN / 22) */
+export interface DateCardOverlay {
+  enabled: boolean;
+  eyebrow: string;
+  weekday: string;
+  day: string;
+  monthYear: string;
+  x: number;
+  y: number;
+  scale: number;
+  rotation: number;
+}
+
+/** 여행 장소 카드 위젯 (장소명·별점·소요시간) */
+export interface PlaceCardOverlay {
+  enabled: boolean;
+  title: string;
+  rating: number;
+  reviews: string;
+  duration: string;
+  status: string;
+  x: number;
+  y: number;
+  scale: number;
+  accent: string;
+}
+
+export interface OverlayState {
+  viewfinder: ViewfinderOverlay;
+  dateCard: DateCardOverlay;
+  placeCard: PlaceCardOverlay;
 }
 
 export interface SubtitleState {
@@ -154,6 +259,10 @@ export interface EditSpec {
   aspect: Aspect;
   subtitles: { enabled: boolean; cues: Cue[]; style: SubtitleStyle };
   hook: HookTitle;
+  /** 사진 스티커(최대 3장) — 영상·자막 사이에 합성된다 */
+  stickers: ImageSticker[];
+  /** 뷰파인더·날짜 카드·장소 카드 위젯 */
+  overlays: OverlayState;
   masks: {
     enabled: boolean;
     mode: MaskMode;

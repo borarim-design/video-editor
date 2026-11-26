@@ -11,6 +11,7 @@ import {
   computeHookLayout,
   computeLayout,
   fnv1a,
+  hash32,
   bounceScale,
   outputGeometry,
   pixelBlock,
@@ -20,8 +21,12 @@ import {
   splitWords,
   wordsFallback,
   type CueLayout,
+  type HookLine,
   type Measure,
 } from './layout';
+import { hookDecorOf } from './presets';
+import { drawStickers, type StickerDrawOptions } from './stickers';
+import { drawOverlays } from './widgets';
 
 export function fontFamilyOf(fontId: string, weight: string): string {
   return fontFamilyName(fontId, weight);
@@ -125,10 +130,13 @@ export interface DrawOptions {
   /** 영상 프레임 대신 정지 이미지를 그릴 때(썸네일) */
   image?: HTMLImageElement | null;
   dragBox?: Region | null;
+  /** 미리보기에서 선택된 스티커 강조 */
+  selectedStickerId?: string | null;
 }
 
-/** 미리보기 한 프레임을 그린다. t 는 트림 시작 기준(초). */
-export function drawPreview(opts: DrawOptions): void {
+/** 미리보기 한 프레임을 그린다. t 는 트림 시작 기준(초).
+ *  반환값: 영상 프레임을 실제로 그렸으면 true (iOS 첫 프레임 폴백 판단용). */
+export function drawPreview(opts: DrawOptions): boolean {
   const { canvas, video, projectWidth, projectHeight, spec, tracks } = opts;
   const geo = outputGeometry(projectWidth, projectHeight, spec.aspect);
   if (canvas.width !== geo.outW || canvas.height !== geo.outH) {
@@ -136,18 +144,18 @@ export function drawPreview(opts: DrawOptions): void {
     canvas.height = geo.outH;
   }
   const ctx = canvas.getContext('2d');
-  if (!ctx) return;
+  if (!ctx) return false;
   ctx.setTransform(1, 0, 0, 1, 0, 0);
   ctx.clearRect(0, 0, canvas.width, canvas.height);
   ctx.fillStyle = '#000';
   ctx.fillRect(0, 0, canvas.width, canvas.height);
 
   const src: HTMLVideoElement | HTMLImageElement | null = opts.image ?? video;
-  if (!src) return;
+  if (!src) return false;
   try {
     ctx.drawImage(src, geo.cropX, geo.cropY, geo.outW, geo.outH, 0, 0, geo.outW, geo.outH);
   } catch {
-    return;
+    return false;
   }
 
   const tSrc = opts.tSource; // 얼굴 트랙·수동 영역은 원본 영상 시간 기준
@@ -183,6 +191,16 @@ export function drawPreview(opts: DrawOptions): void {
     }
   }
 
+  // 사진 스티커 → 위젯 → 후킹 타이틀 → 자막 순서로 얹는다(글자가 항상 맨 위).
+  if (spec.stickers?.length) {
+    const stickerOpts: StickerDrawOptions = { t: opts.t, selectedId: opts.selectedStickerId ?? null };
+    drawStickers(ctx, spec.stickers, geo.outW, geo.outH, stickerOpts);
+  }
+
+  if (spec.overlays) {
+    drawOverlays(ctx, spec.overlays, geo.outW, geo.outH);
+  }
+
   if (spec.hook.enabled) {
     drawHook(ctx, spec.hook, geo.outW, geo.outH, opts.t);
   }
@@ -202,6 +220,7 @@ export function drawPreview(opts: DrawOptions): void {
     ctx.fillRect(d.x, d.y, d.w, d.h);
     ctx.restore();
   }
+  return true;
 }
 
 export function drawSubtitles(
@@ -406,6 +425,52 @@ export function drawSpeedLines(
   ctx.restore();
 }
 
+function colorLuminance(hex: string): number {
+  const c = hex.replace('#', '');
+  const full = c.length === 3 ? c.split('').map((x) => x + x).join('') : c;
+  const n = parseInt(full, 16);
+  if (Number.isNaN(n) || full.length !== 6) return 0;
+  const r = (n >> 16) & 255;
+  const g = (n >> 8) & 255;
+  const b = n & 255;
+  return (0.299 * r + 0.587 * g + 0.114 * b) / 255;
+}
+
+function tornJitter(seed: number, i: number): number {
+  return (hash32(seed, i + 1, 11, 5) / 4294967295) * 2 - 1;
+}
+
+/** 찢어진 종이 조각 모양의 사각형 패스 (결정적 난수) */
+function tornPaperPath(
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  w: number,
+  h: number,
+  seed: number,
+): void {
+  const amp = Math.min(w, h) * 0.05;
+  const nx = 7;
+  const ny = 4;
+  const pts: { x: number; y: number }[] = [];
+  for (let i = 0; i < nx; i += 1) {
+    pts.push({ x: x + (w * i) / (nx - 1), y: y + tornJitter(seed, i) * amp });
+  }
+  for (let i = 1; i < ny; i += 1) {
+    pts.push({ x: x + w + tornJitter(seed, 20 + i) * amp, y: y + (h * i) / (ny - 1) });
+  }
+  for (let i = nx - 2; i >= 0; i -= 1) {
+    pts.push({ x: x + (w * i) / (nx - 1), y: y + h + tornJitter(seed, 40 + i) * amp });
+  }
+  for (let i = ny - 2; i >= 1; i -= 1) {
+    pts.push({ x: x + tornJitter(seed, 60 + i) * amp, y: y + (h * i) / (ny - 1) });
+  }
+  ctx.beginPath();
+  ctx.moveTo(pts[0].x, pts[0].y);
+  for (let i = 1; i < pts.length; i += 1) ctx.lineTo(pts[i].x, pts[i].y);
+  ctx.closePath();
+}
+
 export function drawHook(
   ctx: CanvasRenderingContext2D,
   hook: HookTitle,
@@ -424,6 +489,7 @@ export function drawHook(
   const fontPx = Math.max(6, (hook.fontSize / 100) * H);
   const subPx = Math.max(4, (hook.subSize / 100) * H);
   const family = fontFamilyName(hook.font, hook.weight);
+  const decor = hookDecorOf(hook);
 
   ctx.save();
   ctx.font = `400 ${fontPx}px "${family}", "Malgun Gothic", sans-serif`;
@@ -445,26 +511,100 @@ export function drawHook(
     ctx.fill();
   }
 
-  if (lay.pill) {
+  // 서브 문구 알약(최대 2개 — 반투명 흰 라벨 2개 레퍼런스)
+  lay.pills.forEach((pill) => {
     ctx.fillStyle = rgba(hook.pillColor, hook.pillOpacity);
     ctx.beginPath();
     if (typeof ctx.roundRect === 'function') {
-      ctx.roundRect(lay.pill.x, lay.pill.y, lay.pill.w, lay.pill.h, lay.pill.h / 2);
+      ctx.roundRect(pill.x, pill.y, pill.w, pill.h, pill.h / 2);
     } else {
-      ctx.rect(lay.pill.x, lay.pill.y, lay.pill.w, lay.pill.h);
+      ctx.rect(pill.x, pill.y, pill.w, pill.h);
     }
     ctx.fill();
-    drawWordsCentered(ctx, hook.subtext.trim(), lay.pill.x + lay.pill.w / 2, lay.subBaseline,
+    drawWordsCentered(ctx, pill.text, pill.x + pill.w / 2, pill.y + pill.h / 2 + subPx * 0.35,
       subPx, hook.subColor, 0, hook.strokeColor, family);
-  }
+  });
 
   const strokeW = hook.strokeWidth * lay.fontPx;
-  lay.lines.forEach((line) => {
+  const barH = lay.fontPx * (decor.barShape === 'torn' ? 1.68 : 1.42);
+  const barPadX = lay.fontPx * decor.barPadX;
+  const labelPad = lay.fontPx * 0.22;
+  const bracketAccent = { color: hook.accent, extraStroke: lay.fontPx * 0.035 };
+
+  (lay.lines as HookLine[]).forEach((line, i) => {
+    const isLast = i === lay.lines.length - 1;
+    const barColor = decor.bars && decor.barColors.length
+      ? decor.barColors[i % decor.barColors.length]
+      : null;
+    const lightBar = barColor ? colorLuminance(barColor) > 0.62 : false;
+
+    let color = line.isAccent ? hook.accent : hook.color;
+    if (barColor && lightBar) color = '#141414';
+    if (decor.labelBox && isLast) color = decor.labelBoxTextColor;
+
     ctx.save();
     ctx.translate(W / 2, line.baseline - lay.fontPx * 0.35);
     if (Math.abs(hook.skew) > 0.01) ctx.rotate((hook.skew * Math.PI) / 180);
+
+    if (barColor) {
+      const x0 = -line.width / 2 - barPadX;
+      const w0 = line.width + barPadX * 2;
+      const y0 = -barH / 2;
+      const seed = fnv1a(`${line.text}#${i}`);
+
+      ctx.save();
+      ctx.globalAlpha = Math.max(0, Math.min(1, decor.barOpacity));
+      if (decor.paperShadow) {
+        ctx.shadowColor = 'rgba(0,0,0,0.28)';
+        ctx.shadowBlur = lay.fontPx * 0.14;
+        ctx.shadowOffsetY = lay.fontPx * 0.06;
+      }
+      ctx.fillStyle = barColor;
+      if (decor.barShape === 'torn') tornPaperPath(ctx, x0, y0, w0, barH, seed);
+      else {
+        ctx.beginPath();
+        if (typeof ctx.roundRect === 'function') {
+          ctx.roundRect(x0, y0, w0, barH, lay.fontPx * decor.barRadius);
+        } else {
+          ctx.rect(x0, y0, w0, barH);
+        }
+      }
+      ctx.fill();
+      ctx.restore();
+
+      // 흰 바는 얇은 먹선을 넣어 종이/박스처럼 보이게 한다.
+      if (lightBar) {
+        ctx.save();
+        ctx.strokeStyle = 'rgba(20,20,20,0.7)';
+        ctx.lineWidth = Math.max(1, lay.fontPx * 0.016);
+        if (decor.barShape === 'torn') tornPaperPath(ctx, x0, y0, w0, barH, seed);
+        else {
+          ctx.beginPath();
+          if (typeof ctx.roundRect === 'function') {
+            ctx.roundRect(x0, y0, w0, barH, lay.fontPx * decor.barRadius);
+          } else {
+            ctx.rect(x0, y0, w0, barH);
+          }
+        }
+        ctx.stroke();
+        ctx.restore();
+      }
+    }
+
+    if (decor.labelBox && isLast) {
+      ctx.fillStyle = decor.labelBoxColor;
+      const bh = lay.fontPx * 1.06;
+      ctx.beginPath();
+      if (typeof ctx.roundRect === 'function') {
+        ctx.roundRect(-line.width / 2 - labelPad, -bh / 2, line.width + labelPad * 2, bh, lay.fontPx * 0.1);
+      } else {
+        ctx.rect(-line.width / 2 - labelPad, -bh / 2, line.width + labelPad * 2, bh);
+      }
+      ctx.fill();
+    }
+
     drawWordsCentered(ctx, line.text, 0, lay.fontPx * 0.35, lay.fontPx,
-      line.isAccent ? hook.accent : hook.color, strokeW, hook.strokeColor, family);
+      color, strokeW, hook.strokeColor, family, bracketAccent);
     ctx.restore();
   });
   ctx.restore();
@@ -480,6 +620,7 @@ function drawWordsCentered(
   strokeW: number,
   strokeColor: string,
   family: string,
+  accent?: { color: string; extraStroke: number },
 ): void {
   const words = splitWords(text);
   if (!words.length) return;
@@ -491,13 +632,16 @@ function drawWordsCentered(
   ctx.textAlign = 'left';
   ctx.textBaseline = 'alphabetic';
   words.forEach((w, i) => {
-    if (strokeW > 0.2) {
+    const isBracket = Boolean(accent) && /^\[.*\]$/.test(w);
+    const fill = isBracket && accent ? accent.color : color;
+    const sw = isBracket && accent ? strokeW + accent.extraStroke : strokeW;
+    if (sw > 0.2) {
       ctx.lineJoin = 'round';
-      ctx.lineWidth = strokeW * 2;
+      ctx.lineWidth = sw * 2;
       ctx.strokeStyle = strokeColor;
       ctx.strokeText(w, x, baseline);
     }
-    ctx.fillStyle = color;
+    ctx.fillStyle = fill;
     ctx.fillText(w, x, baseline);
     x += widths[i] + space;
   });

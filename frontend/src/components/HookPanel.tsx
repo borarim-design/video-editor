@@ -1,5 +1,5 @@
-import type { FontFamily, HookPreset, HookTitle, SpeedLines } from '../types';
-import { HOOK_PRESETS } from '../lib/presets';
+import type { FontFamily, HookDecor, HookPreset, HookTitle, SpeedLines } from '../types';
+import { DEFAULT_DECOR, HOOK_PRESETS } from '../lib/presets';
 import { fontFamilyName } from '../lib/fonts';
 import { Section, Segmented, Slider, Toggle, Badge } from './ui';
 
@@ -10,6 +10,7 @@ interface Props {
   onPatch: (patch: Partial<HookTitle>) => void;
   onPreset: (preset: HookPreset) => void;
   onSpeedLines: (patch: Partial<SpeedLines>) => void;
+  onDecor: (patch: Partial<HookDecor>) => void;
   onSeek: (t: number) => void;
 }
 
@@ -20,8 +21,10 @@ export default function HookPanel({
   onPatch,
   onPreset,
   onSpeedLines,
+  onDecor,
   onSeek,
 }: Props) {
+  const decor: HookDecor = { ...DEFAULT_DECOR, ...hook.decor };
   const family = fonts.find((f) => f.id === hook.font) || fonts[0];
   const weights = family?.weights ?? ['regular'];
   const rangeOn = hook.start != null || hook.end != null;
@@ -223,6 +226,60 @@ export default function HookPanel({
         </div>
         <Slider label="배지 불투명도" value={hook.pillOpacity} min={0} max={1} step={0.01} onChange={(v) => onPatch({ pillOpacity: v })} />
         <Slider label="박스 불투명도" value={hook.boxOpacity} min={0} max={0.95} step={0.01} onChange={(v) => onPatch({ boxOpacity: v })} />
+      </Section>
+
+      <Section
+        title="레퍼런스 장식"
+        description="줄 배경 바(형광펜/찢어진 종이)와 검정 라벨 박스. 프리셋이 자동으로 켜지만 여기서 직접 조정할 수 있습니다."
+      >
+        <Toggle label="줄 배경 바" checked={decor.bars} onChange={(v) => onDecor({ bars: v })} />
+        {decor.bars ? (
+          <>
+            <Segmented
+              size="sm"
+              value={decor.barShape}
+              options={[
+                { value: 'rounded', label: '둥근 형광펜' },
+                { value: 'torn', label: '찢어진 종이' },
+              ]}
+              onChange={(v) => onDecor({ barShape: v })}
+            />
+            <div className="grid grid-cols-3 gap-2">
+              {decor.barColors.slice(0, 3).map((color, i) => (
+                <label key={i} className="flex items-center gap-1.5 rounded-lg border border-studio-700 bg-studio-800/50 px-2 py-1.5">
+                  <input
+                    type="color"
+                    value={color}
+                    onChange={(e) => {
+                      const next = [...decor.barColors];
+                      next[i] = e.target.value;
+                      onDecor({ barColors: next });
+                    }}
+                    className="h-6 w-6 rounded-md"
+                    aria-label={`${i + 1}번째 바 색`}
+                  />
+                  <span className="text-[10px] text-studio-300">{i + 1}줄</span>
+                </label>
+              ))}
+            </div>
+            <Slider label="바 여백" value={decor.barPadX} min={0} max={1.2} step={0.02} onChange={(v) => onDecor({ barPadX: v })} />
+            <Slider label="바 불투명도" value={decor.barOpacity} min={0.3} max={1} step={0.01} onChange={(v) => onDecor({ barOpacity: v })} />
+            <Toggle label="종이 그림자" checked={decor.paperShadow} onChange={(v) => onDecor({ paperShadow: v })} />
+          </>
+        ) : null}
+        <Toggle label="마지막 줄 라벨 박스" checked={decor.labelBox} onChange={(v) => onDecor({ labelBox: v })} />
+        {decor.labelBox ? (
+          <div className="grid grid-cols-2 gap-2">
+            <label className="flex items-center gap-1.5 rounded-lg border border-studio-700 bg-studio-800/50 px-2 py-1.5">
+              <input type="color" value={decor.labelBoxColor} onChange={(e) => onDecor({ labelBoxColor: e.target.value })} className="h-6 w-6 rounded-md" aria-label="라벨 박스 색" />
+              <span className="text-[11px] text-studio-300">박스 색</span>
+            </label>
+            <label className="flex items-center gap-1.5 rounded-lg border border-studio-700 bg-studio-800/50 px-2 py-1.5">
+              <input type="color" value={decor.labelBoxTextColor} onChange={(e) => onDecor({ labelBoxTextColor: e.target.value })} className="h-6 w-6 rounded-md" aria-label="라벨 글자 색" />
+              <span className="text-[11px] text-studio-300">글자 색</span>
+            </label>
+          </div>
+        ) : null}
       </Section>
 
       <Section

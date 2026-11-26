@@ -1,4 +1,6 @@
-import type { EditSpec, ExportResult, HookTitle, MaskState, ProjectMeta, SubtitleState } from '../types';
+import type {
+  EditSpec, ExportResult, HookTitle, ImageSticker, MaskState, OverlayState, ProjectMeta, SubtitleState,
+} from '../types';
 import { outputGeometry } from '../lib/layout';
 import { formatBytes, formatTime } from '../lib/format';
 import { ASPECTS } from '../lib/presets';
@@ -12,6 +14,8 @@ interface Props {
   subtitles: SubtitleState;
   hook: HookTitle;
   masks: MaskState;
+  stickers: ImageSticker[];
+  overlays: OverlayState;
   exporting: boolean;
   progress: number;
   message: string;
@@ -29,6 +33,8 @@ export default function ExportPanel({
   subtitles,
   hook,
   masks,
+  stickers,
+  overlays,
   exporting,
   progress,
   message,
@@ -75,6 +81,14 @@ export default function ExportPanel({
             ['후킹 타이틀', hook.enabled
               ? `${hook.preset} · ${hook.title.split('\n').filter(Boolean).length}줄${hook.speedLines.enabled ? ' · 집중선' : ''}`
               : '없음'],
+            ['사진 스티커', stickers.filter((s) => s.enabled).length
+              ? `${stickers.filter((s) => s.enabled).length}장 · ${[...new Set(stickers.filter((s) => s.enabled).map((s) => (s.frame === 'dashed' ? '점선' : s.frame === 'polaroid' ? '폴라로이드' : s.frame === 'rounded' ? '둥근 모서리' : '테두리 없음')))].join(', ')}`
+              : '없음'],
+            ['오버레이', [
+              overlays.viewfinder.enabled ? '뷰파인더' : null,
+              overlays.dateCard.enabled ? '날짜 카드' : null,
+              overlays.placeCard.enabled ? '장소 카드' : null,
+            ].filter(Boolean).join(' · ') || '없음'],
             ['모자이크', masks.enabled ? `직접 ${manualCount}곳 · ${masks.mode === 'blur' ? '블러' : '모자이크'} ${masks.strength}% · ${masks.shape === 'rect' ? '사각형' : masks.shape === 'ellipse' ? '타원' : '원형'}` : '없음'],
             ['원본', `${project.width}×${project.height} · ${project.fps.toFixed(2)}fps`],
           ].map(([k, v]) => (

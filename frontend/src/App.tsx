@@ -1,13 +1,18 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type {
-  Aspect, Cue, EditSpec, ExportResult, FontFamily, HookPreset, HookTitle, ManualMask, MaskState,
-  PersonTrack, Preset, ProjectMeta, SubtitleState, SubtitleStyle,
+  Aspect, Cue, DateCardOverlay, EditSpec, ExportResult, FontFamily, HookPreset, HookTitle, ImageSticker,
+  ManualMask, MaskState, OverlayState, PersonTrack, PlaceCardOverlay, Preset, ProjectMeta, SubtitleState,
+  SubtitleStyle, ViewfinderOverlay,
 } from './types';
-import { DEFAULT_HOOK, DEFAULT_MASKS, DEFAULT_STYLE, ASPECTS, HOOK_PRESETS, applyHookPreset, applyPreset, buildSpec } from './lib/presets';
+import {
+  DEFAULT_HOOK, DEFAULT_MASKS, DEFAULT_OVERLAYS, DEFAULT_STYLE, ASPECTS, HOOK_PRESETS,
+  applyHookPreset, applyPreset, buildSpec, hookDecorOf, newSticker,
+} from './lib/presets';
 import { ensureFontsLoaded, waitForFont, fontFamilyForStyle } from './lib/fonts';
 import { loadLocalVideo } from './lib/local-media';
 import { ExportCanceledError, exportVideo } from './lib/exporter';
 import { clamp, formatTime, uid } from './lib/format';
+import { forgetStickerImage, preloadStickerImages } from './lib/stickers';
 import TopBar from './components/TopBar';
 import UploadZone from './components/UploadZone';
 import PreviewStage from './components/PreviewStage';
@@ -16,8 +21,9 @@ import SubtitlePanel from './components/SubtitlePanel';
 import MaskPanel from './components/MaskPanel';
 import ExportPanel from './components/ExportPanel';
 import HookPanel from './components/HookPanel';
+import OverlayPanel from './components/OverlayPanel';
 
-type Tab = 'title' | 'subtitle' | 'mask' | 'export';
+type Tab = 'title' | 'subtitle' | 'overlay' | 'mask' | 'export';
 
 interface ExportState {
   busy: boolean;
@@ -44,6 +50,9 @@ export default function App() {
   const [subtitles, setSubtitles] = useState<SubtitleState>({ enabled: true, cues: [], style: DEFAULT_STYLE });
   const [hook, setHook] = useState<HookTitle>(DEFAULT_HOOK);
   const [masks, setMasks] = useState<MaskState>(DEFAULT_MASKS);
+  const [stickers, setStickers] = useState<ImageSticker[]>([]);
+  const [selectedStickerId, setSelectedStickerId] = useState<string | null>(null);
+  const [overlays, setOverlays] = useState<OverlayState>(DEFAULT_OVERLAYS);
   const [tracks, setTracks] = useState<PersonTrack[]>([]);
   const [fonts, setFonts] = useState<FontFamily[]>([]);
   const [fontsTick, setFontsTick] = useState(0);
@@ -89,6 +98,24 @@ export default function App() {
     setProject(meta);
   }, []);
 
+  const stickerUrlsRef = useRef<string[]>([]);
+
+  const clearStickers = useCallback(() => {
+    stickerUrlsRef.current.forEach((url) => {
+      forgetStickerImage(url);
+      if (url.startsWith('blob:')) URL.revokeObjectURL(url);
+    });
+    stickerUrlsRef.current = [];
+    setStickers([]);
+    setSelectedStickerId(null);
+  }, []);
+
+  useEffect(() => () => {
+    stickerUrlsRef.current.forEach((url) => {
+      if (url.startsWith('blob:')) URL.revokeObjectURL(url);
+    });
+  }, []);
+
   // ---------------------------------------------------------------- 파일 열기(서버 없이)
   const handleFile = useCallback(async (file: File) => {
     setUpload({ busy: true, error: null });
@@ -100,6 +127,8 @@ export default function App() {
       setTime(0);
       setTracks([]);
       setMasks({ ...DEFAULT_MASKS, tracks: [] });
+      clearStickers();
+      setOverlays(DEFAULT_OVERLAYS);
       setSubtitles({ enabled: true, cues: [], style: DEFAULT_STYLE });
       setHook(DEFAULT_HOOK);
       setRender(IDLE_EXPORT);
@@ -108,7 +137,7 @@ export default function App() {
     } catch (err) {
       setUpload({ busy: false, error: err instanceof Error ? err.message : '영상을 열지 못했습니다.' });
     }
-  }, [releaseResult, replaceProject]);
+  }, [releaseResult, replaceProject, clearStickers]);
 
   const resetProject = useCallback(() => {
     setPlaying(false);
@@ -118,9 +147,11 @@ export default function App() {
     setSubtitles({ enabled: true, cues: [], style: DEFAULT_STYLE });
     setHook(DEFAULT_HOOK);
     setMasks(DEFAULT_MASKS);
+    clearStickers();
+    setOverlays(DEFAULT_OVERLAYS);
     setUpload({ busy: false, error: null });
     setRender(IDLE_EXPORT);
-  }, [releaseResult, replaceProject]);
+  }, [releaseResult, replaceProject, clearStickers]);
 
   // ---------------------------------------------------------------- 재생
   const seekTo = useCallback((t: number) => {
@@ -240,6 +271,55 @@ export default function App() {
     showToast('영역을 추가했습니다. 구간을 조정해 보세요.');
   }, [project, showToast]);
 
+  // ---------------------------------------------------------------- 사진 스티커 · 위젯
+  const addStickerFiles = useCallback((files: FileList | null) => {
+    if (!files || !files.length) return;
+    const room = 3 - stickers.length;
+    if (room <= 0) {
+      showToast('스티커는 3장까지 올릴 수 있어요.');
+      return;
+    }
+    const next: ImageSticker[] = [];
+    Array.from(files).slice(0, room).forEach((file, i) => {
+      if (!file.type.startsWith('image/')) return;
+      const url = URL.createObjectURL(file);
+      stickerUrlsRef.current.push(url);
+      next.push(newSticker(uid('sticker'), file.name.replace(/\.[^.]+$/, ''), url, stickers.length + i));
+    });
+    if (!next.length) {
+      showToast('이미지 파일만 올릴 수 있어요.');
+      return;
+    }
+    setStickers((cur) => [...cur, ...next].slice(0, 3));
+    setSelectedStickerId(next[0].id);
+    setTab('overlay');
+  }, [stickers.length, showToast]);
+
+  const patchSticker = useCallback((id: string, patch: Partial<ImageSticker>) => {
+    setStickers((cur) => cur.map((s) => (s.id === id ? { ...s, ...patch } : s)));
+  }, []);
+
+  const removeSticker = useCallback((id: string) => {
+    const target = stickers.find((s) => s.id === id);
+    if (target) {
+      forgetStickerImage(target.src);
+      if (target.src.startsWith('blob:')) URL.revokeObjectURL(target.src);
+      stickerUrlsRef.current = stickerUrlsRef.current.filter((u) => u !== target.src);
+    }
+    setStickers((cur) => cur.filter((s) => s.id !== id));
+    setSelectedStickerId((cur) => (cur === id ? null : cur));
+  }, [stickers]);
+
+  const patchViewfinder = useCallback((patch: Partial<ViewfinderOverlay>) => {
+    setOverlays((o) => ({ ...o, viewfinder: { ...o.viewfinder, ...patch } }));
+  }, []);
+  const patchDateCard = useCallback((patch: Partial<DateCardOverlay>) => {
+    setOverlays((o) => ({ ...o, dateCard: { ...o.dateCard, ...patch } }));
+  }, []);
+  const patchPlaceCard = useCallback((patch: Partial<PlaceCardOverlay>) => {
+    setOverlays((o) => ({ ...o, placeCard: { ...o.placeCard, ...patch } }));
+  }, []);
+
   // ---------------------------------------------------------------- 내보내기(브라우저 단독)
   const handleCancelExport = useCallback(() => {
     cancelRef.current?.();
@@ -260,7 +340,8 @@ export default function App() {
     setRender({ busy: true, progress: 0, message: '준비 중…', result: null, error: null });
 
     try {
-      const spec: EditSpec = buildSpec(trim, aspect, subtitles, masks, hook);
+      const spec: EditSpec = buildSpec(trim, aspect, subtitles, masks, hook, stickers, overlays);
+      await preloadStickerImages(stickers);
       const result = await exportVideo({
         video,
         projectWidth: project.width,
@@ -292,7 +373,7 @@ export default function App() {
         error: err instanceof Error ? err.message : '영상을 만들지 못했습니다.',
       });
     }
-  }, [project, trim, aspect, subtitles, masks, hook, tracks, releaseResult, showToast, render.busy]);
+  }, [project, trim, aspect, subtitles, masks, hook, stickers, overlays, tracks, releaseResult, showToast, render.busy]);
 
   // ---------------------------------------------------------------- 파생값
   const timelineCues = useMemo(() => subtitles.cues, [subtitles.cues]);
@@ -308,11 +389,11 @@ export default function App() {
   }
 
   return (
-    <div className="flex h-full flex-col bg-studio-900">
+    <div className="flex min-h-full flex-col bg-studio-900 lg:h-full lg:overflow-hidden">
       <TopBar project={project} exporting={render.busy} onReset={resetProject} onExport={handleRender} />
 
-      <main className="flex min-h-0 flex-1 flex-col lg:flex-row">
-        <section className="flex min-h-0 flex-1 flex-col">
+      <main className="flex flex-1 flex-col lg:min-h-0 lg:flex-row">
+        <section className="flex flex-col lg:min-h-0 lg:flex-1">
           <div className="flex items-center gap-2 overflow-x-auto border-b border-studio-700/50 px-3 py-2 sm:px-4">
             <span className="label shrink-0">비율</span>
             <div className="flex gap-1.5">
@@ -333,7 +414,7 @@ export default function App() {
             </span>
           </div>
 
-          <div className="min-h-[42vh] flex-1">
+          <div className="shrink-0 lg:min-h-0 lg:flex-1">
             <PreviewStage
               project={project}
               videoRef={videoRef}
@@ -344,10 +425,15 @@ export default function App() {
               hook={hook}
               masks={masks}
               tracks={tracks}
+              stickers={stickers}
+              overlays={overlays}
+              selectedStickerId={selectedStickerId}
               fontsTick={fontsTick}
               drawMode={drawMode}
               onAddManual={addManualMask}
               onDrawModeChange={setDrawMode}
+              onSelectSticker={setSelectedStickerId}
+              onMoveSticker={(id, patch) => patchSticker(id, patch)}
             />
           </div>
 
@@ -380,11 +466,12 @@ export default function App() {
           </div>
         </section>
 
-        <aside className="flex min-h-0 w-full max-h-[55vh] flex-col border-t border-studio-700/70 bg-studio-900/60 lg:max-h-none lg:w-[400px] lg:border-l lg:border-t-0">
-          <div className="flex shrink-0 gap-1 border-b border-studio-700/70 px-2 py-2">
+        <aside className="flex w-full flex-col border-t border-studio-700/70 bg-studio-900/60 lg:min-h-0 lg:w-[400px] lg:border-l lg:border-t-0">
+          <div className="grid shrink-0 grid-cols-5 gap-1 border-b border-studio-700/70 px-2 py-2">
             {([
               ['title', '후킹 타이틀'],
               ['subtitle', `자막${subtitles.cues.length ? ` ${subtitles.cues.length}` : ''}`],
+              ['overlay', `오버레이${stickers.length ? ` ${stickers.length}` : ''}`],
               ['mask', `모자이크${masks.manual.length ? ` ${masks.manual.length}` : ''}`],
               ['export', '내보내기'],
             ] as [Tab, string][]).map(([key, label]) => (
@@ -392,7 +479,7 @@ export default function App() {
                 key={key}
                 type="button"
                 onClick={() => setTab(key)}
-                className={`flex-1 rounded-lg px-2 py-1.5 text-xs font-semibold transition ${
+                className={`rounded-lg px-1 py-1.5 text-[11px] font-semibold leading-tight transition ${
                   tab === key ? 'bg-neon/15 text-white shadow-glow' : 'text-studio-400 hover:text-white'
                 }`}
               >
@@ -401,7 +488,7 @@ export default function App() {
             ))}
           </div>
 
-          <div className="min-h-0 flex-1">
+          <div className="lg:min-h-0 lg:flex-1">
             {tab === 'title' ? (
               <HookPanel
                 hook={hook}
@@ -410,6 +497,7 @@ export default function App() {
                 onPatch={(patch) => setHook((h) => ({ ...h, ...patch }))}
                 onPreset={chooseHookPreset}
                 onSpeedLines={(patch) => setHook((h) => ({ ...h, speedLines: { ...h.speedLines, ...patch } }))}
+                onDecor={(patch) => setHook((h) => ({ ...h, decor: { ...hookDecorOf(h), ...patch } }))}
                 onSeek={seekTo}
               />
             ) : null}
@@ -424,6 +512,23 @@ export default function App() {
                 onCueChange={updateCue}
                 onCueDelete={deleteCue}
                 onCueAdd={addCue}
+                onSeek={(t) => seekTo(trim.start + t)}
+              />
+            ) : null}
+            {tab === 'overlay' ? (
+              <OverlayPanel
+                stickers={stickers}
+                selectedId={selectedStickerId}
+                overlays={overlays}
+                duration={project.duration}
+                currentTime={currentTimeline}
+                onAddFiles={addStickerFiles}
+                onSelect={setSelectedStickerId}
+                onPatchSticker={patchSticker}
+                onRemoveSticker={removeSticker}
+                onViewfinder={patchViewfinder}
+                onDateCard={patchDateCard}
+                onPlaceCard={patchPlaceCard}
                 onSeek={(t) => seekTo(trim.start + t)}
               />
             ) : null}
@@ -456,6 +561,8 @@ export default function App() {
                 subtitles={subtitles}
                 hook={hook}
                 masks={masks}
+                stickers={stickers}
+                overlays={overlays}
                 exporting={render.busy}
                 progress={render.progress}
                 message={render.message}
