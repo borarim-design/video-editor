@@ -438,20 +438,20 @@ export default function App() {
           </div>
 
           <div className="shrink-0 space-y-2 px-3 pb-3 sm:px-4">
-            <div className="flex items-center gap-2">
-              <button type="button" className="btn-ghost !px-3 !py-1.5" onClick={() => seekTo(time - 1 / (project.fps || 30))} aria-label="이전 프레임">
+            <div className="flex items-center gap-1.5 sm:gap-2">
+              <button type="button" className="btn-ghost !px-2.5 !py-1.5 sm:!px-3" onClick={() => seekTo(time - 1 / (project.fps || 30))} aria-label="이전 프레임">
                 ⏮
               </button>
-              <button type="button" className="btn-primary !px-4 !py-1.5" onClick={togglePlay}>
+              <button type="button" className="btn-primary whitespace-nowrap !px-3 !py-1.5 text-xs sm:!px-4 sm:text-sm" onClick={togglePlay}>
                 {playing ? '⏸ 일시정지' : '▶︎ 재생'}
               </button>
-              <button type="button" className="btn-ghost !px-3 !py-1.5" onClick={() => seekTo(time + 1 / (project.fps || 30))} aria-label="다음 프레임">
+              <button type="button" className="btn-ghost !px-2.5 !py-1.5 sm:!px-3" onClick={() => seekTo(time + 1 / (project.fps || 30))} aria-label="다음 프레임">
                 ⏭
               </button>
-              <span className="font-mono text-[11px] tabular-nums text-studio-400">
+              <span className="whitespace-nowrap font-mono text-[10px] tabular-nums text-studio-400 sm:text-[11px]">
                 {formatTime(time)} / {formatTime(project.duration)}
               </span>
-              <span className="ml-auto text-[10px] text-studio-500">Space 재생 · ←/→ 프레임</span>
+              <span className="ml-auto hidden text-[10px] text-studio-500 sm:block">Space 재생 · ←/→ 프레임</span>
             </div>
             <Timeline
               duration={project.duration}

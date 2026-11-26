@@ -10,13 +10,13 @@ interface Props {
 
 export default function TopBar({ project, exporting, onReset, onExport }: Props) {
   return (
-    <header className="flex shrink-0 items-center gap-3 border-b border-studio-700/70 bg-studio-900/80 px-3 py-2.5 backdrop-blur sm:px-5">
-      <div className="flex items-center gap-2">
-        <div className="flex h-8 w-8 items-center justify-center rounded-xl bg-gradient-to-br from-neon to-neon-cyan text-sm shadow-glow">
+    <header className="flex shrink-0 items-center gap-2 border-b border-studio-700/70 bg-studio-900/80 px-3 py-2 backdrop-blur sm:gap-3 sm:px-5 sm:py-2.5">
+      <div className="flex shrink-0 items-center gap-2">
+        <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-neon to-neon-cyan text-sm shadow-glow">
           ✂️
         </div>
         <div className="leading-tight">
-          <p className="text-sm font-extrabold tracking-tight text-white">릴컷 스튜디오</p>
+          <p className="whitespace-nowrap text-[13px] font-extrabold tracking-tight text-white sm:text-sm">릴컷 스튜디오</p>
           <p className="hidden text-[10px] text-studio-400 sm:block">수동 자막 · 모자이크 · 릴스 비율</p>
         </div>
       </div>
@@ -29,8 +29,8 @@ export default function TopBar({ project, exporting, onReset, onExport }: Props)
       </span>
 
       {project ? (
-        <div className="ml-2 flex min-w-0 items-center gap-2">
-          <span className="max-w-[38vw] truncate rounded-md bg-studio-800/80 px-2 py-1 text-[11px] text-studio-300 sm:max-w-xs">
+        <div className="ml-1 flex min-w-0 flex-1 items-center gap-2 sm:ml-2">
+          <span className="min-w-0 max-w-full truncate rounded-md bg-studio-800/80 px-2 py-1 text-[10px] text-studio-300 sm:max-w-xs sm:text-[11px]">
             {project.filename}
           </span>
           <span className="hidden rounded-md bg-studio-800/60 px-2 py-1 text-[10px] tabular-nums text-studio-400 sm:inline">
@@ -39,13 +39,13 @@ export default function TopBar({ project, exporting, onReset, onExport }: Props)
         </div>
       ) : null}
 
-      <div className="ml-auto flex items-center gap-2">
+      <div className="ml-auto flex shrink-0 items-center gap-1.5 sm:gap-2">
         {project ? (
           <>
-            <button type="button" className="btn-ghost !px-3 !py-1.5 text-xs" onClick={onReset}>
+            <button type="button" className="btn-ghost whitespace-nowrap !px-2.5 !py-1.5 text-[11px] sm:!px-3 sm:text-xs" onClick={onReset}>
               새 영상
             </button>
-            <button type="button" className="btn-primary !px-3.5 !py-1.5 text-xs" onClick={onExport} disabled={exporting}>
+            <button type="button" className="btn-primary whitespace-nowrap !px-2.5 !py-1.5 text-[11px] sm:!px-3.5 sm:text-xs" onClick={onExport} disabled={exporting}>
               {exporting ? '내보내는 중…' : '내보내기'}
             </button>
           </>

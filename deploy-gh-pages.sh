@@ -25,13 +25,16 @@ touch dist/.nojekyll
 
 echo "▶ gh-pages 커밋 생성"
 cd dist
+# 기존 gh-pages 팁을 부모로 붙여 fast-forward 로 올린다(강제 푸시 불필요).
+git --git-dir="$GIT_DIR" fetch -q origin gh-pages || true
+PARENT="$(git --git-dir="$GIT_DIR" rev-parse --verify -q origin/gh-pages || true)"
 IDX="$(mktemp -u)"
 export GIT_INDEX_FILE="$IDX"
 git --git-dir="$GIT_DIR" --work-tree=. add -A -f .
 TREE="$(git --git-dir="$GIT_DIR" write-tree)"
 COMMIT="$(git --git-dir="$GIT_DIR" \
   -c user.name="임보라" -c user.email="borarim0105@gmail.com" \
-  commit-tree "$TREE" -m "deploy: $(date '+%Y-%m-%d %H:%M') 정적 빌드 (main $(git --git-dir="$GIT_DIR" rev-parse --short main))")"
+  commit-tree "$TREE" ${PARENT:+-p "$PARENT"} -m "deploy: $(date '+%Y-%m-%d %H:%M') 정적 빌드 (main $(git --git-dir="$GIT_DIR" rev-parse --short main))")"
 rm -f "$IDX"
 
 echo "▶ 푸시"
