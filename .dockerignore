@@ -1,0 +1,35 @@
+# 빌드 컨텍스트에서 제외 (이미지 경량화 + 캐시 적중)
+.git
+.gitignore
+.github
+
+# 프론트엔드 의존성·산출물 (이미지 안에서 새로 만든다)
+frontend/node_modules
+frontend/dist
+frontend/.parity
+frontend/*.tsbuildinfo
+frontend/.env
+frontend/.env.*
+
+# 백엔드 캐시·가상환경·테스트 산출물
+backend/__pycache__
+backend/**/__pycache__
+backend/**/*.py[cod]
+backend/.venv
+backend/.pytest-work
+backend/tests/.artifacts
+**/.pytest_cache
+
+# 문서·에디터·OS
+README.md
+*.md
+.vscode
+.idea
+.DS_Store
+Thumbs.db
+
+# 업로드/출력 영상, 로그
+*.log
+uploads
+outputs
+tmp

@@ -1,0 +1,16 @@
+fastapi>=0.115,<1.0
+uvicorn[standard]>=0.30,<1.0
+python-multipart>=0.0.9
+
+# 영상 처리
+numpy>=1.26,<3
+# 5.x 에서는 Haar 캐스케이드 API가 빠져 4.x 로 고정한다.
+opencv-python-headless>=4.10,<5
+pillow>=10.0
+
+# 자동 자막(단어 단위 타임스탬프) — ctranslate2 기반이라 torch가 필요 없다.
+faster-whisper>=1.0,<2.0
+
+# ffmpeg 바이너리를 함께 설치하고 싶지 않은 환경(테스트/로컬)에서만 사용.
+# Docker 이미지는 시스템 ffmpeg 를 쓰므로 주석 처리해도 된다.
+imageio-ffmpeg>=0.5

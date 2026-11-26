@@ -1,0 +1,53 @@
+# 의존성
+node_modules/
+.pnpm-store/
+
+# 프론트엔드 빌드/검증 산출물
+dist/
+dist-ssr/
+.parity/
+*.tsbuildinfo
+
+# 파이썬
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+ENV/
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+
+# 테스트·작업 산출물 (영상 파일 포함)
+.pytest-work/
+backend/.pytest-work/
+tests/.artifacts/
+backend/tests/.artifacts/
+tmp/
+.tmp/
+*.local.mp4
+uploads/
+outputs/
+work/
+models/
+
+# 환경변수
+.env
+.env.local
+.env.*.local
+!.env.example
+
+# 에디터 / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+*.swp
+
+# 로그
+logs/
+*.log
+npm-debug.log*
+
+# 스모크 산출물
+frontend/.smoke/

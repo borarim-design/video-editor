@@ -1,0 +1,30 @@
+{
+  "name": "video-editor-frontend",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "description": "숏폼 영상 편집기 — 자동 AI 자막 · 추적 모자이크 (React + Vite + Tailwind)",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc -b && vite build",
+    "typecheck": "tsc -b",
+    "preview": "vite preview",
+    "parity": "tsc -p tsconfig.parity.json && node -e \"require('fs').writeFileSync('.parity/package.json', JSON.stringify({type:'commonjs'}))\" && node .parity/scripts/parity.js",
+    "smoke": "vite build --ssr scripts/smoke.tsx --outDir .smoke --emptyOutDir && node .smoke/smoke.js"
+  },
+  "dependencies": {
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1"
+  },
+  "devDependencies": {
+    "@types/node": "^24.19.2",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "@vitejs/plugin-react": "^6.1.2",
+    "autoprefixer": "^10.4.21",
+    "postcss": "^8.5.6",
+    "tailwindcss": "^3.4.19",
+    "typescript": "~5.9.3",
+    "vite": "^8.3.6"
+  }
+}
