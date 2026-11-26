@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type {
-  Aspect, Cue, EditSpec, FontFamily, ManualMask, MaskState, PersonTrack, Preset,
-  ProjectMeta, RenderResult, SubtitleState, SubtitleStyle,
+  Aspect, Cue, EditSpec, FontFamily, HookPreset, HookTitle, ManualMask, MaskState,
+  PersonTrack, Preset, ProjectMeta, RenderResult, SubtitleState, SubtitleStyle,
 } from './types';
-import { DEFAULT_MASKS, DEFAULT_STYLE, ASPECTS, applyPreset, buildSpec } from './lib/presets';
+import { DEFAULT_HOOK, DEFAULT_MASKS, DEFAULT_STYLE, ASPECTS, HOOK_PRESETS, applyHookPreset, applyPreset, buildSpec } from './lib/presets';
 import { ensureFontsLoaded, waitForFont, fontFamilyForStyle } from './lib/fonts';
 import {
   downloadUrl, pollJob, resultVideoUrl, startDetectFaces, startRender, startTranscribe, uploadProject,
@@ -16,8 +16,9 @@ import Timeline from './components/Timeline';
 import SubtitlePanel from './components/SubtitlePanel';
 import MaskPanel from './components/MaskPanel';
 import ExportPanel from './components/ExportPanel';
+import HookPanel from './components/HookPanel';
 
-type Tab = 'subtitle' | 'mask' | 'export';
+type Tab = 'title' | 'subtitle' | 'mask' | 'export';
 
 interface AsyncState {
   busy: boolean;
@@ -36,6 +37,7 @@ export default function App() {
   const [trim, setTrim] = useState({ start: 0, end: 0 });
   const [aspect, setAspect] = useState<Aspect>('original');
   const [subtitles, setSubtitles] = useState<SubtitleState>({ enabled: true, cues: [], style: DEFAULT_STYLE });
+  const [hook, setHook] = useState<HookTitle>(DEFAULT_HOOK);
   const [masks, setMasks] = useState<MaskState>(DEFAULT_MASKS);
   const [tracks, setTracks] = useState<PersonTrack[]>([]);
   const [fonts, setFonts] = useState<FontFamily[]>([]);
@@ -85,6 +87,7 @@ export default function App() {
       setTracks([]);
       setMasks({ ...DEFAULT_MASKS, tracks: [] });
       setSubtitles({ enabled: true, cues: [], style: DEFAULT_STYLE });
+      setHook(DEFAULT_HOOK);
       setRender({ busy: false, progress: 0, message: '', result: null, jobId: null, error: null });
       setTab('subtitle');
       setUpload({ busy: false, progress: 1, error: null });
@@ -98,6 +101,7 @@ export default function App() {
     setProject(null);
     setTracks([]);
     setSubtitles({ enabled: true, cues: [], style: DEFAULT_STYLE });
+    setHook(DEFAULT_HOOK);
     setMasks(DEFAULT_MASKS);
     setUpload({ busy: false, progress: 0, error: null });
     setRender({ busy: false, progress: 0, message: '', result: null, jobId: null, error: null });
@@ -172,6 +176,17 @@ export default function App() {
 
   const choosePreset = useCallback((preset: Preset) => {
     setSubtitles((s) => ({ ...s, style: applyPreset(s.style, preset) }));
+  }, []);
+
+  const chooseHookPreset = useCallback((preset: HookPreset) => {
+    setHook((h) => {
+      const next = applyHookPreset({ ...h, enabled: true }, preset);
+      const def = HOOK_PRESETS.find((p) => p.id === preset);
+      const fill: Partial<HookTitle> = { enabled: true };
+      if (def && !h.title.trim()) fill.title = def.sampleTitle;
+      if (def && !h.subtext.trim()) fill.subtext = def.sampleSub;
+      return { ...next, ...fill };
+    });
   }, []);
 
   const handleAutoSubtitles = useCallback(async () => {
@@ -267,7 +282,7 @@ export default function App() {
     setRender({ busy: true, progress: 0, message: '준비 중…', result: null, jobId: null, error: null });
     setTab('export');
     try {
-      const spec: EditSpec = buildSpec(trim, aspect, subtitles, masks);
+      const spec: EditSpec = buildSpec(trim, aspect, subtitles, masks, hook);
       const jobId = await startRender(project.id, spec);
       const job = await pollJob<RenderResult>(jobId, (j) =>
         setRender((r) => ({ ...r, busy: true, progress: j.progress, message: j.message })),
@@ -286,7 +301,7 @@ export default function App() {
         error: err instanceof Error ? err.message : '렌더링 실패',
       });
     }
-  }, [project, trim, aspect, subtitles, masks, showToast]);
+  }, [project, trim, aspect, subtitles, masks, hook, showToast]);
 
   // ---------------------------------------------------------------- 파생값
   const timelineCues = useMemo(() => subtitles.cues, [subtitles.cues]);
@@ -335,6 +350,7 @@ export default function App() {
               trim={trim}
               aspect={aspect}
               subtitles={{ ...subtitles, cues: timelineCues }}
+              hook={hook}
               masks={masks}
               tracks={tracks}
               fontsTick={fontsTick}
@@ -376,6 +392,7 @@ export default function App() {
         <aside className="flex min-h-0 w-full max-h-[55vh] flex-col border-t border-studio-700/70 bg-studio-900/60 lg:max-h-none lg:w-[400px] lg:border-l lg:border-t-0">
           <div className="flex shrink-0 gap-1 border-b border-studio-700/70 px-2 py-2">
             {([
+              ['title', '후킹 타이틀'],
               ['subtitle', `자막${subtitles.cues.length ? ` ${subtitles.cues.length}` : ''}`],
               ['mask', `모자이크${tracks.length ? ` ${tracks.length}` : ''}`],
               ['export', '내보내기'],
@@ -394,6 +411,17 @@ export default function App() {
           </div>
 
           <div className="min-h-0 flex-1">
+            {tab === 'title' ? (
+              <HookPanel
+                hook={hook}
+                fonts={fonts}
+                duration={project.duration}
+                onPatch={(patch) => setHook((h) => ({ ...h, ...patch }))}
+                onPreset={chooseHookPreset}
+                onSpeedLines={(patch) => setHook((h) => ({ ...h, speedLines: { ...h.speedLines, ...patch } }))}
+                onSeek={seekTo}
+              />
+            ) : null}
             {tab === 'subtitle' ? (
               <SubtitlePanel
                 subtitles={subtitles}
@@ -446,6 +474,7 @@ export default function App() {
                 trim={trim}
                 aspect={aspect}
                 subtitles={subtitles}
+                hook={hook}
                 masks={masks}
                 exporting={render.busy}
                 progress={render.progress}

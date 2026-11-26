@@ -2,10 +2,12 @@
  * 자막 레이아웃·애니메이션 — backend/app/layout.py 와 1:1 대응.
  * 미리보기와 최종 MP4가 같은 좌표/같은 흔들림을 쓰도록 규칙을 그대로 옮겼다.
  */
-import type { Aspect, Cue, SubtitleStyle } from '../types';
+import type { Aspect, Cue, HookTitle, SpeedLines, SubtitleStyle } from '../types';
 
 export const ASCENT_RATIO = 0.84;
 export const SPACE_EM = 0.32;
+/** 단어 사이 공백 폭(em) — 폰트의 U+0020 유무와 무관하게 고정(백엔드와 동일) */
+export const SPACE_ADVANCE = 0.3;
 
 export function isWide(ch: string): boolean {
   const o = ch.codePointAt(0) ?? 0;
@@ -129,19 +131,20 @@ export function computeLayout(
   const blockHeight = (groups.length - 1) * lineHeight + fontPx;
   const top = (canvasH * style.yPercent) / 100 - blockHeight / 2;
 
+  const spacePx = fontPx * SPACE_ADVANCE;
   const lines: Line[] = groups.map((group, li) => {
     const tokens: Token[] = [];
     let width = 0;
     group.forEach((wi, k) => {
       const w = measure(words[wi]);
-      if (k > 0) width += measure(' ');
+      if (k > 0) width += spacePx;
       tokens.push({ text: words[wi], wordIndex: wi, x: 0, w });
       width += w;
     });
     const startX = (canvasW - width) / 2;
     let x = startX;
     tokens.forEach((tok, k) => {
-      if (k > 0) x += measure(' ');
+      if (k > 0) x += spacePx;
       tok.x = x;
       x += tok.w;
       if (style.letterSpacing) x += style.letterSpacing * fontPx;
@@ -360,4 +363,142 @@ export function hexToRgb(hex: string): [number, number, number] {
 export function rgba(hex: string, alpha: number): string {
   const [r, g, b] = hexToRgb(hex);
   return `rgba(${r}, ${g}, ${b}, ${Math.max(0, Math.min(1, alpha))})`;
+}
+
+
+// ------------------------------------------------------------------ 후킹 타이틀
+export interface HookToken {
+  text: string;
+  x: number;
+  w: number;
+}
+
+export interface HookLine {
+  text: string;
+  width: number;
+  baseline: number;
+  isAccent: boolean;
+  tokens: HookToken[];
+}
+
+export interface HookLayout {
+  fontPx: number;
+  subPx: number;
+  lines: HookLine[];
+  pill: { x: number; y: number; w: number; h: number } | null;
+  subBaseline: number;
+  blockTop: number;
+  blockHeight: number;
+  box: { x: number; y: number; w: number; h: number } | null;
+}
+
+/** backend/app/layout.py compute_hook_layout 와 동일 */
+export function computeHookLayout(
+  hook: HookTitle,
+  canvasW: number,
+  canvasH: number,
+  measureMain: Measure,
+  measureSub: Measure,
+): HookLayout {
+  const fontPx = Math.max(6, (hook.fontSize / 100) * canvasH);
+  const subPx = Math.max(4, (hook.subSize / 100) * canvasH);
+  const lineHeight = fontPx * hook.lineHeight;
+  const maxW = canvasW * 0.92;
+
+  const texts: string[] = [];
+  hook.title.replace(/\r/g, '').split('\n').forEach((rawLine) => {
+    const raw = rawLine.trim();
+    if (!raw) return;
+    let cur = '';
+    splitWords(raw).forEach((w) => {
+      const cand = cur ? `${cur} ${w}` : w;
+      if (cur && measureMain(cand) > maxW) {
+        texts.push(cur);
+        cur = w;
+      } else {
+        cur = cand;
+      }
+    });
+    if (cur) texts.push(cur);
+  });
+
+  const sub = hook.subtext.trim();
+  const hasPill = Boolean(sub);
+  const pillH = subPx * 1.55;
+  const pillPad = subPx * 0.75;
+  const subW = hasPill ? measureSub(sub) : 0;
+  const pillW = subW + pillPad * 2;
+  const gap = hasPill ? subPx * 0.6 : 0;
+
+  const titleH = texts.length ? (texts.length - 1) * lineHeight + fontPx : 0;
+  const blockH = (hasPill ? pillH + gap : 0) + titleH;
+  const top = (canvasH * hook.yPercent) / 100 - blockH / 2;
+
+  const pill = hasPill ? { x: (canvasW - pillW) / 2, y: top, w: pillW, h: pillH } : null;
+  const subBaseline = top + pillH / 2 + subPx * 0.35;
+  const titleTop = top + (hasPill ? pillH + gap : 0);
+
+  const spacePx = fontPx * SPACE_ADVANCE;
+  const lines: HookLine[] = texts.map((text, i) => {
+    const words = splitWords(text);
+    const widths = words.map((w) => measureMain(w));
+    const lineW = widths.reduce((a, b) => a + b, 0) + spacePx * Math.max(0, words.length - 1);
+    let x = (canvasW - lineW) / 2;
+    const tokens: HookToken[] = words.map((w, k) => {
+      const tok = { text: w, x, w: widths[k] };
+      x += widths[k] + spacePx;
+      return tok;
+    });
+    return {
+      text,
+      width: lineW,
+      baseline: titleTop + fontPx * 0.86 + i * lineHeight,
+      isAccent: hook.accentLine > 0 && i + 1 === hook.accentLine,
+      tokens,
+    };
+  });
+
+  let box: HookLayout['box'] = null;
+  if (hook.boxOpacity > 0.001) {
+    const padX = fontPx * 0.55;
+    const padY = fontPx * 0.42;
+    const widest = Math.max(...lines.map((l) => l.width), hasPill ? pillW : 0, 0);
+    box = { x: (canvasW - widest) / 2 - padX, y: top - padY, w: widest + padX * 2, h: blockH + padY * 2 };
+  }
+
+  return { fontPx, subPx, lines, pill, subBaseline, blockTop: top, blockHeight: blockH, box };
+}
+
+/** backend/app/layout.py speed_line_polys 와 동일 */
+export function speedLinePolys(
+  canvasW: number,
+  canvasH: number,
+  cfg: SpeedLines,
+): { x: number; y: number }[][] {
+  const cx = canvasW / 2;
+  const cy = canvasH / 2;
+  const base = Math.min(canvasW, canvasH);
+  const count = Math.max(6, Math.min(240, Math.floor(cfg.count)));
+  const seed = Math.floor(cfg.seed);
+  const out: { x: number; y: number }[][] = [];
+  const step = (2 * Math.PI) / count;
+  for (let i = 0; i < count; i += 1) {
+    const a = step * i + (jiggle(i, seed, 0, 1) * 0.5 + 0.5) * step * 0.6;
+    const ca = Math.cos(a);
+    const sa = Math.sin(a);
+    const edge = Math.min(
+      canvasW / 2 / Math.max(1e-6, Math.abs(ca)),
+      canvasH / 2 / Math.max(1e-6, Math.abs(sa)),
+    );
+    const r0 = edge * cfg.innerRadius * (0.96 + 0.1 * Math.abs(jiggle(i, seed, 0, 2)));
+    const w = base * 0.0042 * (0.35 + 1.15 * Math.abs(jiggle(i, seed, 0, 3)));
+    const px = -sa * w;
+    const py = ca * w;
+    out.push([
+      { x: cx + r0 * ca + px, y: cy + r0 * sa + py },
+      { x: cx + r0 * ca - px, y: cy + r0 * sa - py },
+      { x: cx + edge * 1.03 * ca, y: cy + edge * 1.03 * sa },
+    ]);
+  }
+  return out;
 }

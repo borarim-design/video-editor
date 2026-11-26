@@ -326,6 +326,127 @@ def test_subtitle_toggle_and_timing(client, uploaded):
     assert abs(bright(on["_path"], 0.2) - bright(off["_path"], 0.2)) < 300
 
 
+# ------------------------------------------------------------------ 5-b) 상단 후킹 타이틀
+HOOK_PRESETS = {
+    "reviewming": dict(
+        preset="reviewming", subtext="결혼준비 브이로그", title="2027년에 결혼하면\n개이득인 이유",
+        yPercent=24, fontSize=9.0, subSize=2.9, color="#FFFFFF", accent="#FFD84D",
+        accentLine=2, strokeWidth=0.12, skew=-6, font="pretendard", weight="extrabold",
+        pillColor="#000000", pillOpacity=0.55,
+        speedLines={"enabled": True, "color": "#FFFFFF", "opacity": 0.5,
+                    "count": 76, "innerRadius": 0.62, "seed": 7},
+    ),
+    "vlog": dict(
+        preset="vlog", subtext="", title="드레스 피팅 Vlog",
+        yPercent=26, fontSize=8.6, strokeWidth=0.16, skew=0,
+        font="pretendard", weight="bold", accentLine=0,
+    ),
+    "blackbox": dict(
+        preset="blackbox", subtext="", title="엄마! 학예회 때\n예쁘게 좀 하고와",
+        yPercent=20, fontSize=7.4, boxColor="#000000", boxOpacity=0.56, boxRadius=0.35,
+        strokeWidth=0, font="dohyeon", weight="regular", accentLine=0,
+    ),
+    "badge": dict(
+        preset="badge", subtext="등대같은 월세집", title="월세 30만원에\n이런 뷰라고?",
+        yPercent=24, fontSize=8.8, subSize=2.7, font="nanumpen", weight="regular",
+        strokeWidth=0.05, skew=-3, pillColor="#7C5CFF", pillOpacity=0.88, accentLine=0,
+    ),
+}
+
+
+def _top_band_diff(a: np.ndarray, b: np.ndarray, ratio: float = 0.45) -> float:
+    h = a.shape[0]
+    band = slice(0, int(h * ratio))
+    return float(np.abs(a[band].astype(np.int16) - b[band].astype(np.int16)).mean())
+
+
+@pytest.mark.parametrize("preset", list(HOOK_PRESETS))
+def test_hook_title_presets(client, uploaded, preset):
+    spec_hook = base_spec(hook={"enabled": True, **HOOK_PRESETS[preset]})
+    plain = render(client, uploaded["id"], base_spec(), timeout=300)
+    with_hook = render(client, uploaded["id"], spec_hook, timeout=300)
+
+    f_hook = frames_of(with_hook["_path"], [1.0])[1.0]
+    f_plain = frames_of(plain["_path"], [1.0])[1.0]
+    assert f_hook.shape == f_plain.shape
+
+    top = _top_band_diff(f_hook, f_plain)
+    bottom = float(np.abs(f_hook[int(0.6 * f_hook.shape[0]):].astype(np.int16)
+                          - f_plain[int(0.6 * f_plain.shape[0]):].astype(np.int16)).mean())
+    assert top > 3.0, f"{preset}: 상단 타이틀이 그려지지 않음 ({top:.2f})"
+    # 집중선 프리셋은 화면 전체(가장자리)가 바뀌므로 비율 기준을 완화한다.
+    ratio = 1.3 if HOOK_PRESETS[preset].get("speedLines", {}).get("enabled") else 2.5
+    assert top > bottom * ratio, f"{preset}: 상단({top:.2f})이 하단({bottom:.2f})보다 확실히 달라야 함"
+
+    # 글자가 실제로 있는지: 상단 영역의 밝은 픽셀
+    band = f_hook[: int(0.45 * f_hook.shape[0])]
+    bright = int((band.reshape(-1, 3).max(axis=1) > 230).sum())
+    assert bright > 300, f"{preset}: 타이틀 글자 픽셀이 너무 적음 ({bright})"
+
+    if preset == "reviewming":
+        # 포인트 색(노랑) 2번째 줄
+        b, g, r = band[..., 0].astype(int), band[..., 1].astype(int), band[..., 2].astype(int)
+        yellow = int(((r > 200) & (g > 170) & (b < 120)).sum())
+        assert yellow > 60, f"포인트 색 줄이 없음 ({yellow})"
+        # 서브바(반투명 검정 알약) → 어두운 픽셀 증가
+        dark_plain = int((frames_of(plain["_path"], [1.0])[1.0][: int(0.45 * 360)]
+                          .reshape(-1, 3).max(axis=1) < 40).sum())
+        dark_hook = int((band.reshape(-1, 3).max(axis=1) < 40).sum())
+        assert dark_hook > dark_plain + 300, (dark_hook, dark_plain)
+
+
+def test_hook_speed_lines_and_time_range(client, uploaded):
+    style = dict(HOOK_PRESETS["reviewming"])
+    style["speedLines"] = {"enabled": False, "count": 76, "innerRadius": 0.62, "seed": 7}
+    with_lines_spec = base_spec(hook={"enabled": True, **HOOK_PRESETS["reviewming"]})
+    no_lines_spec = base_spec(hook={"enabled": True, **style})
+    with_lines = render(client, uploaded["id"], with_lines_spec, timeout=300)
+    no_lines = render(client, uploaded["id"], no_lines_spec, timeout=300)
+
+    f1 = frames_of(with_lines["_path"], [1.0])[1.0]
+    f2 = frames_of(no_lines["_path"], [1.0])[1.0]
+    # 가장자리(좌우 15%) 밝기가 올라가야 한다(반투명 흰 선).
+    h, w = f1.shape[:2]
+    left = slice(0, int(w * 0.15))
+    right = slice(w - int(w * 0.15), w)
+    bright1 = max(float(f1[:, left].mean()), float(f1[:, right].mean()))
+    bright2 = max(float(f2[:, left].mean()), float(f2[:, right].mean()))
+    assert bright1 > bright2 + 1.5, f"집중선이 그려지지 않음 ({bright1:.2f} vs {bright2:.2f})"
+
+    # 가장자리에서 밝은(선) 픽셀도 늘어난다
+    white1 = int((((f1[:, left].max(axis=2) > 110) | (f1[:, right].max(axis=2) > 110))).sum())
+    white2 = int((((f2[:, left].max(axis=2) > 110) | (f2[:, right].max(axis=2) > 110))).sum())
+    assert white1 > white2, (white1, white2)
+
+    # 표시 시간 구간: 1.0~2.0초에만 보여야 한다
+    ranged = dict(HOOK_PRESETS["vlog"])
+    ranged.update({"start": 1.0, "end": 2.0})
+    spec = base_spec(trim={"start": 0.0, "end": 3.0}, hook={"enabled": True, **ranged})
+    plain = render(client, uploaded["id"], base_spec(trim={"start": 0.0, "end": 3.0}), timeout=300)
+    out = render(client, uploaded["id"], spec, timeout=300)
+
+    a = frames_of(out["_path"], [0.5, 1.5])
+    b = frames_of(plain["_path"], [0.5, 1.5])
+    before = _top_band_diff(a[0.5], b[0.5])
+    inside = _top_band_diff(a[1.5], b[1.5])
+    assert inside > 3.0, inside
+    assert before < 1.2, before
+
+
+def test_hook_with_subtitles_together(client, uploaded):
+    cue = {"id": "c1", "start": 0.1, "end": 2.0, "text": "본문 자막은 그대로"}
+    spec = base_spec(
+        subtitles={"enabled": True, "cues": [cue], "style": dict(STYLES["highlight"], fontSize=8, yPercent=84)},
+        hook={"enabled": True, **HOOK_PRESETS["badge"]},
+    )
+    result = render(client, uploaded["id"], spec, timeout=300)
+    frame = frames_of(result["_path"], [1.0])[1.0]
+    h = frame.shape[0]
+    top_bright = int((frame[: int(0.4 * h)].reshape(-1, 3).max(axis=1) > 220).sum())
+    bottom_bright = int((frame[int(0.6 * h):].reshape(-1, 3).max(axis=1) > 220).sum())
+    assert top_bright > 300 and bottom_bright > 300, (top_bright, bottom_bright)
+
+
 # ------------------------------------------------------------------ 6) 트림·비율
 def test_trim_and_aspect(client, uploaded):
     spec = base_spec(trim={"start": 1.0, "end": 3.0}, aspect="9:16")
@@ -465,3 +586,44 @@ def test_layout_parity_with_frontend():
         assert item["sigma"] == pytest.approx(blur_sigma(item["strength"], 120, 160), abs=1e-9)
     for item in js["masks"]["pixel"]:
         assert item["block"] == pixel_block(item["strength"], 120, 160)
+
+    # ---- 상단 후킹 타이틀 레이아웃 일치
+    from app.layout import compute_hook_layout, speed_line_polys, text_em
+    from app.models import HookTitle, SpeedLines
+
+    for case in js["hooks"]:
+        hook = HookTitle(**case["hook"])
+        main_px = max(6.0, hook.fontSize / 100.0 * case["canvasH"])
+        sub_px = max(4.0, hook.subSize / 100.0 * case["canvasH"])
+        py = compute_hook_layout(
+            hook, case["canvasW"], case["canvasH"],
+            lambda t, s=main_px: text_em(t) * s,
+            lambda t, s=sub_px: text_em(t) * s,
+        )
+        jl = case["layout"]
+        assert len(py.lines) == len(jl["lines"]), (case["name"], [l.text for l in py.lines], jl["lines"])
+        assert py.font_px == pytest.approx(jl["fontPx"], abs=1e-9)
+        assert py.block_top == pytest.approx(jl["blockTop"], abs=1e-9)
+        for a, b in zip(py.lines, jl["lines"]):
+            assert a.text == b["text"]
+            assert a.is_accent == b["isAccent"]
+            assert a.baseline == pytest.approx(b["baseline"], abs=1e-9)
+            assert a.width == pytest.approx(b["width"], abs=1e-9)
+            for (text, x, w), tok in zip(a.tokens, b["tokens"]):
+                assert text == tok["text"]
+                assert x == pytest.approx(tok["x"], abs=1e-9)
+                assert w == pytest.approx(tok["w"], abs=1e-9)
+        if py.pill is None:
+            assert jl["pill"] is None
+        else:
+            for pv, jv in zip(py.pill, [jl["pill"]["x"], jl["pill"]["y"], jl["pill"]["w"], jl["pill"]["h"]]):
+                assert pv == pytest.approx(jv, abs=1e-9)
+
+    cfg = SpeedLines(**{"enabled": True, "color": "#FFFFFF", "opacity": 0.5,
+                        "count": 76, "innerRadius": 0.62, "seed": 7})
+    polys = speed_line_polys(1080, 1920, cfg)
+    assert len(polys) == js["speedLines"]["count"]
+    for a, b in zip(polys[:3], js["speedLines"]["first"]):
+        for (px, pyv), pt in zip(a, b):
+            assert px == pytest.approx(pt["x"], abs=1e-9)
+            assert pyv == pytest.approx(pt["y"], abs=1e-9)

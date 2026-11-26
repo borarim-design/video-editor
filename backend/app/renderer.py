@@ -19,6 +19,7 @@ from PIL import Image
 from . import tracking as T
 from .media import VideoWriter, extract_audio, output_geometry
 from .models import RenderSpec
+from .hook_draw import HookRenderer
 from .subtitle_draw import SubtitleRenderer
 
 logger = logging.getLogger("video-editor.render")
@@ -157,6 +158,10 @@ def render(project, spec: RenderSpec, tracks: List[dict], out_path: Path,
     if spec.subtitles.enabled and cues:
         subtitle_renderer = SubtitleRenderer(spec.subtitles.style)
 
+    hook_renderer = None
+    if spec.hook.enabled:
+        hook_renderer = HookRenderer(spec.hook)
+
     # 어떤 트랙을 가릴지 (명시된 인물만 켠다 — 프론트엔드는 감지된 인물 전체를 보낸다)
     enabled_tracks: Dict[int, bool] = {int(t.id): bool(t.enabled) for t in spec.masks.tracks}
     track_frames: Dict[int, list] = {}
@@ -210,6 +215,8 @@ def render(project, spec: RenderSpec, tracks: List[dict], out_path: Path,
                     apply_mosaic(crop, box, mode, strength, shape)
 
             canvas = Image.fromarray(cv2.cvtColor(crop, cv2.COLOR_BGR2RGB))
+            if hook_renderer is not None:
+                canvas = hook_renderer.draw(canvas, t_out, duration)
             if subtitle_renderer is not None:
                 canvas = subtitle_renderer.draw(canvas, cues, t_out)
 

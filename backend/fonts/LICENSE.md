@@ -16,6 +16,10 @@
 | `gaegu-{regular,bold}.ttf` | Gaegu (개구) | SIL Open Font License 1.1 | https://github.com/google/fonts/tree/main/ofl/gaegu |
 | `jua-regular.ttf` | Jua (주아) | SIL Open Font License 1.1 | https://github.com/google/fonts/tree/main/ofl/jua |
 | `galmuri11-regular.ttf` | Galmuri 11 (갈무리 11) | SIL Open Font License 1.1 | https://github.com/quiple/galmuri |
+| `cafe24surround-regular.ttf` | 카페24 써라운드 (Cafe24 Ssurround) | 카페24 무료 배포 라이선스(상업적 사용 허용) | https://noonnu.cc/font_page/669 |
+| `paperlogy-extra.ttf` | Paperlogy 8ExtraBold | SIL Open Font License 1.1 | https://noonnu.cc/font_page/1456 |
+| `dohyeon-regular.ttf` | 배민 도현체 (Do Hyeon) | SIL Open Font License 1.1 | https://github.com/google/fonts/tree/main/ofl/dohyeon |
+| `bagel-regular.ttf` | Bagel Fat One (베이글팻원) | SIL Open Font License 1.1 | https://github.com/google/fonts/tree/main/ofl/bagelfatone |
 
 ## SIL Open Font License 1.1 요약
 - 자유롭게 사용·복제·수정·재배포할 수 있습니다(상업적 사용 포함).

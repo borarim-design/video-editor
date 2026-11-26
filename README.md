@@ -47,7 +47,25 @@
 
 ![추적 모자이크](docs/samples/mosaic.png)
 
-### 4. 내보내기
+### 4. 상단 후킹 타이틀 (오프닝 헤드라인)
+본문 자막과 별개로 **영상 위쪽에 고정되는 제목 오버레이**. 입력 항목:
+서브 문구(알약 배지) · 메인 타이틀(최대 2줄) · 표시 시간(전체 / 시작~끝 초) ·
+세로 위치(Y%) · 크기 · 메인/포인트 색 · 외곽선 · 기울임 · 배지·박스 배경.
+
+| 프리셋 | 설명 |
+| --- | --- |
+| 🔥 리뷰밍밍 | 반투명 검정 알약 서브바 + **기울어진 2줄 빅 타이틀**(2줄 포인트 컬러) |
+| 🎬 감성 브이로그 | 굵은 외곽선 한 줄 타이틀(중앙/상단) |
+| 🖤 블랙 박스 | 반투명 라운드 박스 + 굵은 흰 글씨 |
+| 🏷️ 배지 + 손글씨 | 컬러 배지 + 삐뚤빼뚤 손글씨(명조/펜) 타이틀 |
+
+**집중선(스피드라인)** 오버레이 ON/OFF — 화면 가장자리에서 중심으로 뻗는 흰 방사선으로
+도입부·썸네일 임팩트를 냅니다(개수·불투명도·중심 여백·색 조절).
+집중선 삼각형 좌표와 타이틀 좌표도 프론트·백엔드가 **같은 정수 해시/계산식**을 씁니다.
+
+![리뷰밍밍 스타일 후킹 타이틀](docs/samples/hook-reviewming.png)
+
+### 5. 내보내기
 - 작업(job) 기반 비동기 렌더링 + 진행률 표시
 - 완성된 MP4 **다운로드** 및 결과 미리보기(스트리밍)
 - H.264 / AAC, `+faststart`
@@ -70,6 +88,7 @@ video-editor/
 │  │  ├─ transcribe.py        # faster-whisper 자동 자막·큐 분절
 │  │  ├─ layout.py            # 자막 레이아웃/애니메이션 (TS와 1:1)
 │  │  ├─ subtitle_draw.py     # Pillow 자막 렌더러
+│  │  ├─ hook_draw.py         # 상단 후킹 타이틀 + 집중선 렌더러
 │  │  ├─ renderer.py          # 크롭·마스크·자막 → MP4 파이프라인
 │  │  ├─ fonts.py             # 폰트 카탈로그(/api/fonts)
 │  │  ├─ store.py             # 프로젝트/작업 저장소·스레드 풀
@@ -90,7 +109,7 @@ video-editor/
 
 ---
 
-## 🔤 한글 폰트 (10종 / 17파일)
+## 🔤 한글 폰트 (14종 / 21파일)
 
 요즘 릴스·숏츠·브이로그에서 많이 쓰는 무료 폰트를 **실제 TTF로 저장소에 포함**했습니다.
 프론트엔드는 `/api/fonts`로, 백엔드는 `backend/fonts`의 **같은 파일**을 쓰기 때문에 미리보기와 결과물의 글꼴이 100% 일치합니다.
@@ -99,6 +118,10 @@ video-editor/
 | --- | --- | --- |
 | 프리텐다드 (Pretendard) | 고딕 | regular / bold / extrabold |
 | G마켓 산스 | 고딕·임팩트 | regular / bold |
+| 카페24 써라운드 | 둥근 제목 | regular |
+| 페이퍼로지 | 임팩트 | extrabold |
+| 배민 도현체 | 임팩트 | regular |
+| 베이글팻원 (Bagel Fat One) | 둥근 제목 | regular |
 | 검은고딕 (Black Han Sans) | 임팩트 | regular |
 | Noto Sans KR | 고딕 | regular / bold |
 | 나눔명조 | 명조 | regular / bold |
@@ -193,6 +216,12 @@ npm run dev        # http://localhost:5173 → /api 는 8080 으로 프록시
                "words": [{ "text": "안녕하세요", "start": 0.4, "end": 1.8 }] }],
     "style": { "preset": "jiggle", "font": "maruburi", "fontSize": 8, "wobble": 60, "yPercent": 72 }
   },
+  "hook": {
+    "enabled": true, "preset": "reviewming", "subtext": "결혼준비 브이로그",
+    "title": "2027년에 결혼하면\n개이득인 이유", "start": null, "end": null,
+    "yPercent": 24, "fontSize": 9, "accentLine": 2, "accent": "#FFD84D", "skew": -6,
+    "pillOpacity": 0.55, "speedLines": { "enabled": true, "count": 76, "opacity": 0.5 }
+  },
   "masks": {
     "enabled": true, "mode": "blur", "shape": "ellipse", "strength": 65, "pad": 0.18,
     "tracks": [{ "id": 1, "enabled": true }],
@@ -235,8 +264,11 @@ python -m pytest -m "not slow"   # 모델 다운로드 없이 빠르게
    지글지글은 프레임 간 흔들림까지 확인, 구간 밖에서는 자막이 사라짐
 8. **트림·비율** — 9:16 / 1:1 출력 크기와 길이, 오디오 유지
 9. **자동 자막(ASR)** — TTS 음성 → faster-whisper → 큐 생성 → 그 큐로 렌더까지
+9-1. **상단 후킹 타이틀 4종** — 리뷰밍밍/브이로그/블랙박스/배지 렌더, 상단 영역 변화량,
+   포인트 색 줄·서브바 픽셀 검사, 집중선 유무 비교, 표시 시간 구간, 본문 자막과 동시 렌더
 10. **레이아웃 파리티** — 같은 입력에서 TS(Canvas)와 Python(Pillow)의 줄바꿈·baseline·토큰 좌표·
-    바운스/지글지글 값·크롭 기하·블러/픽셀 공식이 **수치적으로 동일**한지 비교
+    바운스/지글지글 값·크롭 기하·블러/픽셀 공식, 그리고 **후킹 타이틀 좌표·집중선 삼각형**까지
+    **수치적으로 동일**한지 비교
 
 ---
 

@@ -11,9 +11,10 @@ import math
 from dataclasses import dataclass, field
 from typing import Callable, Dict, List, Optional, Sequence
 
-from .models import Cue, SubtitleStyle
+from .models import Cue, HookTitle, SpeedLines, SubtitleStyle
 
 ASCENT_RATIO = 0.84  # baseline 이 줄 박스 위에서 차지하는 비율
+SPACE_ADVANCE = 0.30  # 단어 사이 공백 폭(em) — 폰트의 U+0020 유무와 무관하게 고정
 SPACE_EM = 0.32
 
 
@@ -145,18 +146,19 @@ def compute_layout(
     for li, group in enumerate(line_groups):
         tokens: List[Token] = []
         width = 0.0
+        space_px = font_px * SPACE_ADVANCE
         for k, wi in enumerate(group):
             text = words[wi]
             w = measure(text)
             if k > 0:
-                width += measure(" ")
+                width += space_px
             tokens.append(Token(text=text, word_index=wi, w=w))
             width += w
         start_x = (canvas_w - width) / 2.0
         x = start_x
         for k, tok in enumerate(tokens):
             if k > 0:
-                x += measure(" ")
+                x += space_px
             tok.x = x
             x += tok.w
             if style.letterSpacing:
@@ -274,4 +276,133 @@ def words_fallback(cue: Cue) -> List[Dict[str, float]]:
         acc += len(w)
         e = cue.start + dur * acc / total
         out.append({"text": w, "start": s, "end": e})
+    return out
+
+
+# ------------------------------------------------------------------ 후킹 타이틀
+@dataclass
+class HookLine:
+    text: str
+    width: float
+    baseline: float
+    is_accent: bool
+    tokens: List[tuple] = field(default_factory=list)  # (text, x, width)
+
+
+@dataclass
+class HookLayout:
+    font_px: float
+    sub_px: float
+    lines: List[HookLine]
+    pill: Optional[tuple]
+    sub_baseline: float
+    block_top: float
+    block_height: float
+    box: Optional[tuple]
+
+
+def compute_hook_layout(
+    hook: HookTitle,
+    canvas_w: float,
+    canvas_h: float,
+    measure_main: Callable[[str], float],
+    measure_sub: Callable[[str], float],
+) -> HookLayout:
+    """상단 후킹 타이틀 블록의 좌표(프론트 `computeHookLayout` 과 동일)."""
+    font_px = max(6.0, hook.fontSize / 100.0 * canvas_h)
+    sub_px = max(4.0, hook.subSize / 100.0 * canvas_h)
+    line_height = font_px * hook.lineHeight
+    max_w = canvas_w * 0.92
+
+    texts: List[str] = []
+    for raw in hook.title.replace("\r", "").split("\n"):
+        raw = raw.strip()
+        if not raw:
+            continue
+        words = split_words(raw)
+        cur = ""
+        for w in words:
+            cand = w if not cur else cur + " " + w
+            if cur and measure_main(cand) > max_w:
+                texts.append(cur)
+                cur = w
+            else:
+                cur = cand
+        if cur:
+            texts.append(cur)
+
+    sub = hook.subtext.strip()
+    has_pill = bool(sub)
+    pill_h = sub_px * 1.55
+    pill_pad = sub_px * 0.75
+    sub_w = measure_sub(sub) if has_pill else 0.0
+    pill_w = sub_w + pill_pad * 2.0
+    gap = sub_px * 0.6 if has_pill else 0.0
+
+    title_h = (len(texts) - 1) * line_height + font_px if texts else 0.0
+    block_h = (pill_h + gap if has_pill else 0.0) + title_h
+    top = canvas_h * hook.yPercent / 100.0 - block_h / 2.0
+
+    pill = ((canvas_w - pill_w) / 2.0, top, pill_w, pill_h) if has_pill else None
+    sub_baseline = top + pill_h / 2.0 + sub_px * 0.35
+    title_top = top + (pill_h + gap if has_pill else 0.0)
+
+    lines: List[HookLine] = []
+    space_px = font_px * SPACE_ADVANCE
+    for i, text in enumerate(texts):
+        words = split_words(text)
+        widths = [measure_main(w) for w in words]
+        line_w = sum(widths) + space_px * max(0, len(words) - 1)
+        x = (canvas_w - line_w) / 2.0
+        toks: List[tuple] = []
+        for w, ww in zip(words, widths):
+            toks.append((w, x, ww))
+            x += ww + space_px
+        lines.append(
+            HookLine(
+                text=text,
+                width=line_w,
+                baseline=title_top + font_px * 0.86 + i * line_height,
+                is_accent=hook.accentLine > 0 and (i + 1) == hook.accentLine,
+                tokens=toks,
+            )
+        )
+
+    box = None
+    if hook.boxOpacity > 0.001:
+        pad_x = font_px * 0.55
+        pad_y = font_px * 0.42
+        widest = max([ln.width for ln in lines] + ([pill_w] if has_pill else []) + [0.0])
+        box = ((canvas_w - widest) / 2.0 - pad_x, top - pad_y,
+               widest + pad_x * 2.0, block_h + pad_y * 2.0)
+
+    return HookLayout(font_px=font_px, sub_px=sub_px, lines=lines, pill=pill,
+                      sub_baseline=sub_baseline, block_top=top,
+                      block_height=block_h, box=box)
+
+
+def speed_line_polys(canvas_w: float, canvas_h: float,
+                     cfg: SpeedLines) -> List[List[tuple]]:
+    """집중선(스피드라인) 삼각형 목록 — 프론트 `speedLinePolys` 와 동일."""
+    cx, cy = canvas_w / 2.0, canvas_h / 2.0
+    base = min(canvas_w, canvas_h)
+    count = max(6, min(240, int(cfg.count)))
+    seed = int(cfg.seed)
+    out: List[List[tuple]] = []
+    step = 2.0 * math.pi / count
+    for i in range(count):
+        a = step * i + (jiggle(i, seed, 0, 1) * 0.5 + 0.5) * step * 0.6
+        ca, sa = math.cos(a), math.sin(a)
+        # 그 각도로 프레임 가장자리까지의 거리 → 가장자리 근처에만 선을 그린다.
+        edge = min(
+            (canvas_w / 2.0) / max(1e-6, abs(ca)),
+            (canvas_h / 2.0) / max(1e-6, abs(sa)),
+        )
+        r0 = edge * cfg.innerRadius * (0.96 + 0.1 * abs(jiggle(i, seed, 0, 2)))
+        w = base * 0.0042 * (0.35 + 1.15 * abs(jiggle(i, seed, 0, 3)))
+        px, py = -sa * w, ca * w
+        x1, y1 = cx + r0 * ca + px, cy + r0 * sa + py
+        x2, y2 = cx + r0 * ca - px, cy + r0 * sa - py
+        x3, y3 = cx + edge * 1.03 * ca, cy + edge * 1.03 * sa
+        out.append([(x1, y1), (x2, y2), (x3, y3)])
     return out

@@ -1,4 +1,4 @@
-import type { EditSpec, MaskState, ProjectMeta, RenderResult, SubtitleState } from '../types';
+import type { EditSpec, HookTitle, MaskState, ProjectMeta, RenderResult, SubtitleState } from '../types';
 import { outputGeometry } from '../lib/layout';
 import { formatBytes, formatTime } from '../lib/format';
 import { ASPECTS } from '../lib/presets';
@@ -9,6 +9,7 @@ interface Props {
   trim: { start: number; end: number };
   aspect: EditSpec['aspect'];
   subtitles: SubtitleState;
+  hook: HookTitle;
   masks: MaskState;
   exporting: boolean;
   progress: number;
@@ -25,6 +26,7 @@ export default function ExportPanel({
   trim,
   aspect,
   subtitles,
+  hook,
   masks,
   exporting,
   progress,
@@ -69,6 +71,9 @@ export default function ExportPanel({
             ['해상도', `${geo.outW} × ${geo.outH}`],
             ['길이', `${duration.toFixed(2)}초 (${formatTime(trim.start)}–${formatTime(trim.end)})`],
             ['자막', subtitles.enabled ? `${subtitles.cues.length}개 · ${subtitles.style.preset}` : '없음'],
+            ['후킹 타이틀', hook.enabled
+              ? `${hook.preset} · ${hook.title.split('\n').filter(Boolean).length}줄${hook.speedLines.enabled ? ' · 집중선' : ''}`
+              : '없음'],
             ['모자이크', masks.enabled ? `인물 ${activeTracks}명 · 직접 ${manualCount}곳 · ${masks.mode === 'blur' ? '블러' : '모자이크'} ${masks.strength}%` : '없음'],
             ['원본', `${project.width}×${project.height} · ${project.fps.toFixed(2)}fps`],
           ].map(([k, v]) => (

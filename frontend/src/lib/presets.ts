@@ -1,4 +1,4 @@
-import type { Cue, EditSpec, MaskState, SubtitleState, SubtitleStyle } from '../types';
+import type { Cue, EditSpec, HookPreset, HookTitle, MaskState, SubtitleState, SubtitleStyle } from '../types';
 
 /** 캔버스/백엔드 공통 자막 스타일 기본값 (backend/app/models.py SubtitleStyle 과 동일) */
 export const DEFAULT_STYLE: SubtitleStyle = {
@@ -23,6 +23,132 @@ export const DEFAULT_STYLE: SubtitleStyle = {
   highlightScale: 1.12,
   letterSpacing: 0,
 };
+
+export const DEFAULT_HOOK: HookTitle = {
+  enabled: false,
+  preset: 'reviewming',
+  subtext: '',
+  title: '',
+  start: null,
+  end: null,
+  yPercent: 24,
+  fontSize: 9,
+  subSize: 3,
+  color: '#FFFFFF',
+  accent: '#FFD84D',
+  accentLine: 2,
+  strokeColor: '#000000',
+  strokeWidth: 0.12,
+  boxColor: '#000000',
+  boxOpacity: 0,
+  boxRadius: 0.35,
+  pillColor: '#000000',
+  pillOpacity: 0.55,
+  subColor: '#FFFFFF',
+  skew: 0,
+  font: 'pretendard',
+  weight: 'extrabold',
+  lineHeight: 1.16,
+  speedLines: {
+    enabled: false,
+    color: '#FFFFFF',
+    opacity: 0.5,
+    count: 76,
+    innerRadius: 0.62,
+    seed: 7,
+  },
+};
+
+export interface HookPresetDef {
+  id: HookPreset;
+  name: string;
+  tagline: string;
+  emoji: string;
+  sampleTitle: string;
+  sampleSub: string;
+  style: Partial<HookTitle>;
+}
+
+/** 상단 후킹 타이틀 프리셋 4종 (레퍼런스 릴스 스타일) */
+export const HOOK_PRESETS: HookPresetDef[] = [
+  {
+    id: 'reviewming',
+    name: '리뷰밍밍',
+    tagline: '서브바 + 기울임 2줄 빅타이틀 + 집중선',
+    emoji: '🔥',
+    sampleTitle: '2027년에 결혼하면\n개이득인 이유',
+    sampleSub: '결혼준비 브이로그',
+    style: {
+      yPercent: 24, fontSize: 9, subSize: 2.9, color: '#FFFFFF', accent: '#FFD84D',
+      accentLine: 2, strokeWidth: 0.12, skew: -6, font: 'pretendard', weight: 'extrabold',
+      pillColor: '#000000', pillOpacity: 0.55, subColor: '#FFFFFF',
+      boxOpacity: 0, lineHeight: 1.16,
+      speedLines: {
+        enabled: true, color: '#FFFFFF', opacity: 0.5, count: 76, innerRadius: 0.62, seed: 7,
+      },
+    },
+  },
+  {
+    id: 'vlog',
+    name: '감성 브이로그',
+    tagline: '굵은 외곽선 한 줄 타이틀',
+    emoji: '🎬',
+    sampleTitle: '드레스 피팅 Vlog',
+    sampleSub: '',
+    style: {
+      yPercent: 26, fontSize: 8.6, subSize: 2.8, color: '#FFFFFF', accent: '#FFFFFF',
+      accentLine: 0, strokeWidth: 0.16, skew: 0, font: 'pretendard', weight: 'bold',
+      boxOpacity: 0, pillOpacity: 0.5, lineHeight: 1.16,
+      speedLines: {
+        enabled: false, color: '#FFFFFF', opacity: 0.5, count: 76, innerRadius: 0.62, seed: 7,
+      },
+    },
+  },
+  {
+    id: 'blackbox',
+    name: '블랙 박스',
+    tagline: '반투명 라운드 박스 + 굵은 흰 글씨',
+    emoji: '🖤',
+    sampleTitle: '엄마! 학예회 때\n예쁘게 좀 하고와',
+    sampleSub: '',
+    style: {
+      yPercent: 20, fontSize: 7.4, subSize: 2.6, color: '#FFFFFF', accent: '#FFFFFF',
+      accentLine: 0, strokeWidth: 0, skew: 0, font: 'dohyeon', weight: 'regular',
+      boxOpacity: 0.56, boxColor: '#000000', boxRadius: 0.35, lineHeight: 1.18,
+      speedLines: {
+        enabled: false, color: '#FFFFFF', opacity: 0.5, count: 76, innerRadius: 0.62, seed: 7,
+      },
+    },
+  },
+  {
+    id: 'badge',
+    name: '배지 + 손글씨',
+    tagline: '컬러 배지 + 삐뚤빼뚤 손글씨',
+    emoji: '🏷️',
+    sampleTitle: '월세 30만원에\n이런 뷰라고?',
+    sampleSub: '등대같은 월세집',
+    style: {
+      yPercent: 24, fontSize: 8.8, subSize: 2.7, color: '#FFFFFF', accent: '#FFFFFF',
+      accentLine: 0, strokeWidth: 0.05, skew: -3, font: 'nanumpen', weight: 'regular',
+      pillColor: '#7C5CFF', pillOpacity: 0.88, subColor: '#FFFFFF',
+      boxOpacity: 0, lineHeight: 1.2,
+      speedLines: {
+        enabled: false, color: '#FFFFFF', opacity: 0.5, count: 76, innerRadius: 0.62, seed: 7,
+      },
+    },
+  },
+];
+
+export function applyHookPreset(hook: HookTitle, preset: HookPreset): HookTitle {
+  const def = HOOK_PRESETS.find((p) => p.id === preset);
+  if (!def) return { ...hook, preset };
+  return {
+    ...hook,
+    ...def.style,
+    preset,
+    speedLines: { ...(def.style.speedLines ?? hook.speedLines) },
+  };
+}
 
 export interface PresetDef {
   id: SubtitleStyle['preset'];
@@ -127,6 +253,7 @@ export function buildSpec(
   aspect: EditSpec['aspect'],
   subtitles: SubtitleState,
   masks: MaskState,
+  hook: HookTitle,
 ): EditSpec {
   return {
     trim: { start: trim.start, end: trim.end },
@@ -136,6 +263,7 @@ export function buildSpec(
       cues: subtitles.cues,
       style: subtitles.style,
     },
+    hook,
     masks: {
       enabled: masks.enabled,
       mode: masks.mode,

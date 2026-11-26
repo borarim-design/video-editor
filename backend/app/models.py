@@ -13,6 +13,7 @@ Aspect = Literal["original", "9:16", "1:1", "16:9", "4:5"]
 Preset = Literal["highlight", "bounce", "box", "outline", "jiggle", "plain"]
 MaskMode = Literal["blur", "pixelate"]
 MaskShape = Literal["rect", "ellipse", "circle"]
+HookPreset = Literal["reviewming", "vlog", "blackbox", "badge", "plain"]
 
 
 class Word(BaseModel):
@@ -93,10 +94,52 @@ class Trim(BaseModel):
     end: Optional[float] = None
 
 
+class SpeedLines(BaseModel):
+    """집중선(스피드라인) 오버레이 — 화면 가장자리에서 중심으로 뻗는 방사형 선."""
+
+    enabled: bool = False
+    color: str = "#FFFFFF"
+    opacity: float = 0.5
+    count: int = 76
+    innerRadius: float = 0.62  # 가장자리까지 거리 대비 시작점
+    seed: int = 7
+
+
+class HookTitle(BaseModel):
+    """릴스 상단 후킹 타이틀(오프닝/고정 헤드라인)."""
+
+    enabled: bool = False
+    preset: HookPreset = "reviewming"
+    subtext: str = ""          # 알약 배지용 서브 문구
+    title: str = ""            # 메인 타이틀 (\n 으로 최대 2줄)
+    start: Optional[float] = None
+    end: Optional[float] = None
+    yPercent: float = 22.0     # 블록 중심 세로 위치 %
+    fontSize: float = 9.0      # 캔버스 높이 대비 %
+    subSize: float = 3.0       # 서브 문구 크기 %
+    color: str = "#FFFFFF"
+    accent: str = "#FFD84D"
+    accentLine: int = 2        # 포인트 색을 적용할 줄 (1부터, 0이면 없음)
+    strokeColor: str = "#000000"
+    strokeWidth: float = 0.12
+    boxColor: str = "#000000"
+    boxOpacity: float = 0.0
+    boxRadius: float = 0.3
+    pillColor: str = "#000000"
+    pillOpacity: float = 0.55
+    subColor: str = "#FFFFFF"
+    skew: float = 0.0          # 줄 기울임(도)
+    font: str = "pretendard"
+    weight: str = "extrabold"
+    lineHeight: float = 1.16
+    speedLines: SpeedLines = Field(default_factory=SpeedLines)
+
+
 class RenderSpec(BaseModel):
     trim: Trim = Field(default_factory=Trim)
     aspect: Aspect = "original"
     subtitles: SubtitleTrack = Field(default_factory=SubtitleTrack)
+    hook: HookTitle = Field(default_factory=HookTitle)
     masks: MaskSpec = Field(default_factory=MaskSpec)
 
 

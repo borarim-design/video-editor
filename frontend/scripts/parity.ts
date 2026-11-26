@@ -6,13 +6,15 @@
 import {
   bounceScale,
   charTransform,
+  computeHookLayout,
   computeLayout,
   outputGeometry,
   blurSigma,
   pixelBlock,
+  speedLinePolys,
   textEm,
 } from '../src/lib/layout';
-import type { Cue, SubtitleStyle } from '../src/types';
+import type { Cue, HookTitle, SubtitleStyle, SpeedLines } from '../src/types';
 
 const baseStyle = (patch: Partial<SubtitleStyle> = {}): SubtitleStyle => ({
   preset: 'highlight',
@@ -120,4 +122,103 @@ const masks = {
   pixel: [1, 25, 60, 100].map((s) => ({ strength: s, block: pixelBlock(s, 120, 160) })),
 };
 
-process.stdout.write(JSON.stringify({ cases: out, geo, masks }));
+// ------------------------------------------------------------------ 후킹 타이틀
+const hookBase = (patch: Partial<HookTitle> = {}): HookTitle => ({
+  enabled: true,
+  preset: 'reviewming',
+  subtext: '',
+  title: '',
+  start: null,
+  end: null,
+  yPercent: 24,
+  fontSize: 9,
+  subSize: 3,
+  color: '#FFFFFF',
+  accent: '#FFD84D',
+  accentLine: 2,
+  strokeColor: '#000000',
+  strokeWidth: 0.12,
+  boxColor: '#000000',
+  boxOpacity: 0,
+  boxRadius: 0.35,
+  pillColor: '#000000',
+  pillOpacity: 0.55,
+  subColor: '#FFFFFF',
+  skew: -6,
+  font: 'pretendard',
+  weight: 'extrabold',
+  lineHeight: 1.16,
+  speedLines: {
+    enabled: false, color: '#FFFFFF', opacity: 0.5, count: 76, innerRadius: 0.62, seed: 7,
+  },
+  ...patch,
+});
+
+const hookCases = [
+  {
+    name: 'hook-reviewming',
+    canvasW: 1080,
+    canvasH: 1920,
+    hook: hookBase({ subtext: '결혼준비 브이로그', title: '2027년에 결혼하면\n개이득인 이유' }),
+  },
+  {
+    name: 'hook-blackbox',
+    canvasW: 640,
+    canvasH: 360,
+    hook: hookBase({
+      preset: 'blackbox', subtext: '', title: '엄마! 학예회 때\n예쁘게 좀 하고와',
+      fontSize: 7.4, yPercent: 20, boxOpacity: 0.56, skew: 0, accentLine: 0,
+    }),
+  },
+  {
+    name: 'hook-long-line',
+    canvasW: 1080,
+    canvasH: 1920,
+    hook: hookBase({ title: '아주 긴 제목이 한 줄을 넘어가면 자동으로 다음 줄로 넘어가는지 확인하는 케이스입니다', fontSize: 8 }),
+  },
+];
+
+const hookOut = hookCases.map((c) => {
+  const mainPx = Math.max(6, (c.hook.fontSize / 100) * c.canvasH);
+  const subPx = Math.max(4, (c.hook.subSize / 100) * c.canvasH);
+  const lay = computeHookLayout(
+    c.hook, c.canvasW, c.canvasH,
+    (t: string) => textEm(t) * mainPx,
+    (t: string) => textEm(t) * subPx,
+  );
+  return {
+    name: c.name,
+    canvasW: c.canvasW,
+    canvasH: c.canvasH,
+    hook: c.hook,
+    layout: {
+      fontPx: lay.fontPx,
+      subPx: lay.subPx,
+      pill: lay.pill,
+      subBaseline: lay.subBaseline,
+      blockTop: lay.blockTop,
+      blockHeight: lay.blockHeight,
+      box: lay.box,
+      lines: lay.lines.map((l) => ({
+        text: l.text,
+        width: l.width,
+        baseline: l.baseline,
+        isAccent: l.isAccent,
+        tokens: l.tokens,
+      })),
+    },
+  };
+});
+
+const speedCfg: SpeedLines = {
+  enabled: true, color: '#FFFFFF', opacity: 0.5, count: 76, innerRadius: 0.62, seed: 7,
+};
+const speedPolys = speedLinePolys(1080, 1920, speedCfg);
+
+process.stdout.write(JSON.stringify({
+  cases: out,
+  geo,
+  masks,
+  hooks: hookOut,
+  speedLines: { count: speedPolys.length, first: speedPolys.slice(0, 3) },
+}));

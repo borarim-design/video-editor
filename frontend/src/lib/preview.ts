@@ -1,12 +1,14 @@
 /**
  * Canvas 실시간 미리보기 — backend/app/subtitle_draw.py, renderer.py 와 같은 계산.
  */
-import type { Cue, EditSpec, PersonTrack, SubtitleStyle } from '../types';
+import type { Cue, EditSpec, HookTitle, PersonTrack, SpeedLines, SubtitleStyle } from '../types';
 import { fontFamilyName } from './fonts';
 import {
+  SPACE_ADVANCE,
   boxAtFrames,
   blurSigma,
   charTransform,
+  computeHookLayout,
   computeLayout,
   fnv1a,
   bounceScale,
@@ -14,6 +16,7 @@ import {
   pixelBlock,
   pyRound,
   rgba,
+  speedLinePolys,
   splitWords,
   wordsFallback,
   type CueLayout,
@@ -178,6 +181,10 @@ export function drawPreview(opts: DrawOptions): void {
         m.strength ?? spec.masks.strength,
         m.shape ?? spec.masks.shape);
     }
+  }
+
+  if (spec.hook.enabled) {
+    drawHook(ctx, spec.hook, geo.outW, geo.outH, opts.t);
   }
 
   if (spec.subtitles.enabled) {
@@ -377,3 +384,121 @@ export function toSourceNorm(
 }
 
 export { splitWords, pyRound };
+
+
+// ------------------------------------------------------------------ 후킹 타이틀
+export function drawSpeedLines(
+  ctx: CanvasRenderingContext2D,
+  W: number,
+  H: number,
+  cfg: SpeedLines,
+): void {
+  ctx.save();
+  ctx.fillStyle = rgba(cfg.color, cfg.opacity);
+  speedLinePolys(W, H, cfg).forEach((tri) => {
+    ctx.beginPath();
+    ctx.moveTo(tri[0].x, tri[0].y);
+    ctx.lineTo(tri[1].x, tri[1].y);
+    ctx.lineTo(tri[2].x, tri[2].y);
+    ctx.closePath();
+    ctx.fill();
+  });
+  ctx.restore();
+}
+
+export function drawHook(
+  ctx: CanvasRenderingContext2D,
+  hook: HookTitle,
+  W: number,
+  H: number,
+  t: number,
+): void {
+  const start = hook.start ?? 0;
+  const end = hook.end;
+  if (t < start - 1e-6) return;
+  if (end != null && t > end + 1e-6) return;
+  if (!hook.title.trim() && !hook.subtext.trim() && !hook.speedLines.enabled) return;
+
+  if (hook.speedLines.enabled) drawSpeedLines(ctx, W, H, hook.speedLines);
+
+  const fontPx = Math.max(6, (hook.fontSize / 100) * H);
+  const subPx = Math.max(4, (hook.subSize / 100) * H);
+  const family = fontFamilyName(hook.font, hook.weight);
+
+  ctx.save();
+  ctx.font = `400 ${fontPx}px "${family}", "Malgun Gothic", sans-serif`;
+  const measureMain = (text: string) => (text ? ctx.measureText(text).width : 0);
+  ctx.font = `400 ${subPx}px "${family}", "Malgun Gothic", sans-serif`;
+  const measureSub = (text: string) => (text ? ctx.measureText(text).width : 0);
+
+  const lay = computeHookLayout(hook, W, H, measureMain, measureSub);
+
+  if (lay.box) {
+    ctx.fillStyle = rgba(hook.boxColor, hook.boxOpacity);
+    ctx.beginPath();
+    const radius = Math.min(hook.boxRadius * lay.fontPx, lay.box.w / 2, lay.box.h / 2);
+    if (typeof ctx.roundRect === 'function') {
+      ctx.roundRect(lay.box.x, lay.box.y, lay.box.w, lay.box.h, radius);
+    } else {
+      ctx.rect(lay.box.x, lay.box.y, lay.box.w, lay.box.h);
+    }
+    ctx.fill();
+  }
+
+  if (lay.pill) {
+    ctx.fillStyle = rgba(hook.pillColor, hook.pillOpacity);
+    ctx.beginPath();
+    if (typeof ctx.roundRect === 'function') {
+      ctx.roundRect(lay.pill.x, lay.pill.y, lay.pill.w, lay.pill.h, lay.pill.h / 2);
+    } else {
+      ctx.rect(lay.pill.x, lay.pill.y, lay.pill.w, lay.pill.h);
+    }
+    ctx.fill();
+    drawWordsCentered(ctx, hook.subtext.trim(), lay.pill.x + lay.pill.w / 2, lay.subBaseline,
+      subPx, hook.subColor, 0, hook.strokeColor, family);
+  }
+
+  const strokeW = hook.strokeWidth * lay.fontPx;
+  lay.lines.forEach((line) => {
+    ctx.save();
+    ctx.translate(W / 2, line.baseline - lay.fontPx * 0.35);
+    if (Math.abs(hook.skew) > 0.01) ctx.rotate((hook.skew * Math.PI) / 180);
+    drawWordsCentered(ctx, line.text, 0, lay.fontPx * 0.35, lay.fontPx,
+      line.isAccent ? hook.accent : hook.color, strokeW, hook.strokeColor, family);
+    ctx.restore();
+  });
+  ctx.restore();
+}
+
+function drawWordsCentered(
+  ctx: CanvasRenderingContext2D,
+  text: string,
+  centerX: number,
+  baseline: number,
+  sizePx: number,
+  color: string,
+  strokeW: number,
+  strokeColor: string,
+  family: string,
+): void {
+  const words = splitWords(text);
+  if (!words.length) return;
+  ctx.font = `400 ${sizePx}px "${family}", "Malgun Gothic", sans-serif`;
+  const widths = words.map((w) => ctx.measureText(w).width);
+  const space = sizePx * SPACE_ADVANCE;
+  const total = widths.reduce((a, b) => a + b, 0) + space * Math.max(0, words.length - 1);
+  let x = centerX - total / 2;
+  ctx.textAlign = 'left';
+  ctx.textBaseline = 'alphabetic';
+  words.forEach((w, i) => {
+    if (strokeW > 0.2) {
+      ctx.lineJoin = 'round';
+      ctx.lineWidth = strokeW * 2;
+      ctx.strokeStyle = strokeColor;
+      ctx.strokeText(w, x, baseline);
+    }
+    ctx.fillStyle = color;
+    ctx.fillText(w, x, baseline);
+    x += widths[i] + space;
+  });
+}

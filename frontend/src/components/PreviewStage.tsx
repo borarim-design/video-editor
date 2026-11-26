@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { PointerEvent as ReactPointerEvent, RefObject } from 'react';
-import type { EditSpec, PersonTrack, ProjectMeta, SubtitleState, MaskState } from '../types';
+import type { EditSpec, HookTitle, PersonTrack, ProjectMeta, SubtitleState, MaskState } from '../types';
 import { outputGeometry } from '../lib/layout';
 import { drawPreview, toSourceNorm } from '../lib/preview';
 import { formatTime } from '../lib/format';
@@ -12,6 +12,7 @@ interface Props {
   trim: { start: number; end: number };
   aspect: EditSpec['aspect'];
   subtitles: SubtitleState;
+  hook: HookTitle;
   masks: MaskState;
   tracks: PersonTrack[];
   fontsTick: number;
@@ -34,6 +35,7 @@ export default function PreviewStage({
   trim,
   aspect,
   subtitles,
+  hook,
   masks,
   tracks,
   fontsTick,
@@ -55,6 +57,7 @@ export default function PreviewStage({
       trim,
       aspect,
       subtitles: { enabled: subtitles.enabled, cues: subtitles.cues, style: subtitles.style },
+      hook,
       masks: {
         enabled: masks.enabled,
         mode: masks.mode,
@@ -65,7 +68,7 @@ export default function PreviewStage({
         manual: masks.manual,
       },
     }),
-    [trim, aspect, subtitles, masks],
+    [trim, aspect, subtitles, hook, masks],
   );
 
   const render = useCallback(() => {

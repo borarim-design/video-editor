@@ -101,6 +101,46 @@ export interface MaskState {
   manual: ManualMask[];
 }
 
+export interface SpeedLines {
+  enabled: boolean;
+  color: string;
+  opacity: number;
+  count: number;
+  innerRadius: number;
+  seed: number;
+}
+
+export type HookPreset = 'reviewming' | 'vlog' | 'blackbox' | 'badge' | 'plain';
+
+/** 릴스 상단 후킹 타이틀(오프닝/고정 헤드라인) */
+export interface HookTitle {
+  enabled: boolean;
+  preset: HookPreset;
+  subtext: string;
+  title: string;
+  start: number | null;
+  end: number | null;
+  yPercent: number;
+  fontSize: number;
+  subSize: number;
+  color: string;
+  accent: string;
+  accentLine: number;
+  strokeColor: string;
+  strokeWidth: number;
+  boxColor: string;
+  boxOpacity: number;
+  boxRadius: number;
+  pillColor: string;
+  pillOpacity: number;
+  subColor: string;
+  skew: number;
+  font: string;
+  weight: string;
+  lineHeight: number;
+  speedLines: SpeedLines;
+}
+
 export interface SubtitleState {
   enabled: boolean;
   cues: Cue[];
@@ -111,6 +151,7 @@ export interface EditSpec {
   trim: { start: number; end: number };
   aspect: Aspect;
   subtitles: { enabled: boolean; cues: Cue[]; style: SubtitleStyle };
+  hook: HookTitle;
   masks: {
     enabled: boolean;
     mode: MaskMode;
