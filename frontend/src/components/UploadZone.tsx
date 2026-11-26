@@ -1,12 +1,13 @@
 import { useRef, useState } from 'react';
 
 interface Props {
-  onFile: (file: File) => void;
+  /** 영상 파일 여러 개를 한 번에 받는다(타임라인에 순서대로 이어 붙인다) */
+  onFiles: (files: File[]) => void;
   busy?: boolean;
   error?: string | null;
 }
 
-export default function UploadZone({ onFile, busy, error }: Props) {
+export default function UploadZone({ onFiles, busy, error }: Props) {
   const inputRef = useRef<HTMLInputElement>(null);
   const [hover, setHover] = useState(false);
 
@@ -38,8 +39,8 @@ export default function UploadZone({ onFile, busy, error }: Props) {
           onDrop={(e) => {
             e.preventDefault();
             setHover(false);
-            const file = e.dataTransfer.files?.[0];
-            if (file) onFile(file);
+            const files = Array.from(e.dataTransfer.files ?? []).filter((f) => f.type.startsWith('video/') || /\.(mp4|m4v|mov|webm|ogv|ogg|mkv)$/i.test(f.name));
+            if (files.length) onFiles(files);
           }}
           className={`group relative flex w-full flex-col items-center justify-center gap-3 rounded-3xl border-2 border-dashed px-6 py-14 transition ${
             hover ? 'border-neon bg-neon/10' : 'border-studio-600 bg-studio-850/60 hover:border-neon/70 hover:bg-studio-850'
@@ -50,7 +51,8 @@ export default function UploadZone({ onFile, busy, error }: Props) {
           </div>
           <div className="text-center">
             <p className="text-base font-semibold text-white">영상 파일을 끌어다 놓거나 눌러서 선택</p>
-            <p className="mt-1 text-xs text-studio-400">MP4 · MOV · WebM · 파일은 내 컴퓨터에서 나가지 않습니다</p>
+            <p className="mt-1 text-xs text-studio-400">MP4 · MOV · WebM · 여러 개를 한 번에 골라 이어 붙일 수 있어요</p>
+            <p className="mt-1 text-[11px] text-studio-500">파일은 내 기기에서 나가지 않습니다</p>
           </div>
           {busy ? (
             <p className="animate-pulseSoft text-[11px] text-studio-300">영상을 여는 중…</p>
@@ -63,10 +65,11 @@ export default function UploadZone({ onFile, busy, error }: Props) {
           </p>
         ) : null}
 
-        <div className="mt-8 grid grid-cols-1 gap-3 sm:grid-cols-3">
+        <div className="mt-8 grid grid-cols-1 gap-3 sm:grid-cols-2">
           {[
             ['✨', '단어 하이라이트 자막', '수동 자막에 단어 강조·바운스·박스·지글지글'],
             ['🫥', '수동 모자이크', '드래그로 영역 지정, 블러↔모자이크 강도 조절'],
+            ['🎬', '여러 영상 이어 붙이기', '영상 2개 이상을 골라 한 편으로 — 순서·트림까지'],
             ['📱', '릴스·숏츠 비율', '9:16 · 1:1 · 16:9 · 4:5 · 3:4 로 바로 내보내기'],
           ].map(([emoji, title, desc]) => (
             <div key={title} className="rounded-2xl border border-studio-700/70 bg-studio-850/50 p-4">
@@ -88,10 +91,11 @@ export default function UploadZone({ onFile, busy, error }: Props) {
         ref={inputRef}
         type="file"
         accept="video/mp4,video/quicktime,video/webm,video/x-m4v,video/*"
+        multiple
         className="hidden"
         onChange={(e) => {
-          const file = e.target.files?.[0];
-          if (file) onFile(file);
+          const files = Array.from(e.target.files ?? []);
+          if (files.length) onFiles(files);
           e.target.value = '';
         }}
       />

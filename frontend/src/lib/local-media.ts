@@ -5,7 +5,7 @@
  * <video> 에 물리고, 해상도·길이·오디오 유무를 브라우저에서 직접 확인한다.
  * 파일은 사용자의 컴퓨터를 벗어나지 않는다.
  */
-import type { ProjectMeta } from '../types';
+import type { ProjectMeta, VideoClip } from '../types';
 import { uid } from './format';
 
 const VIDEO_EXT = /\.(mp4|m4v|mov|webm|ogv|ogg|mkv)$/i;
@@ -176,4 +176,25 @@ export async function loadLocalVideo(file: File): Promise<ProjectMeta> {
       /* ignore */
     }
   }
+}
+
+/**
+ * 영상 파일 여러 개를 타임라인 클립으로 읽는다.
+ * (loadLocalVideo 로 해상도·길이·오디오 유무를 확인한 뒤 클립 구조로 바꾼다)
+ */
+export async function loadVideoClip(file: File): Promise<VideoClip> {
+  const meta = await loadLocalVideo(file);
+  return {
+    id: uid('clip'),
+    url: meta.srcUrl,
+    name: meta.filename,
+    duration: meta.duration,
+    width: meta.width,
+    height: meta.height,
+    trimStart: 0,
+    trimEnd: meta.duration,
+    hasAudio: meta.hasAudio,
+    fps: meta.fps || 30,
+    sizeBytes: meta.sizeBytes,
+  };
 }

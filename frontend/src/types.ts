@@ -55,6 +55,27 @@ export interface ProjectMeta {
   srcUrl: string;
 }
 
+/**
+ * 타임라인에 순서대로 이어 붙이는 영상 클립 하나.
+ * `url` 은 blob: 객체 URL 이고, trimStart~trimEnd 구간만 편집본에 쓰인다.
+ */
+export interface VideoClip {
+  id: string;
+  url: string;
+  name: string;
+  /** 원본 파일 전체 길이(초) */
+  duration: number;
+  width: number;
+  height: number;
+  /** 원본 안에서 쓰기 시작하는 지점(초) */
+  trimStart: number;
+  /** 원본 안에서 쓰기를 끝내는 지점(초) */
+  trimEnd: number;
+  hasAudio: boolean;
+  fps: number;
+  sizeBytes?: number;
+}
+
 export interface TrackKeyframe {
   t: number;
   x: number;

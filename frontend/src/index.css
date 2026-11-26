@@ -141,11 +141,17 @@
 
 /*
  * 모바일 미리보기: 화면 높이와 폭 중 먼저 닿는 쪽에 맞춰 비율을 유지한다.
- * (세로 영상이 컨트롤·타임라인을 화면 밖으로 밀어내지 않도록 최대 46vh)
+ * 상단에 고정(sticky)된 채로 아래 패널을 스크롤할 수 있도록 최대 34vh 로 묶는다.
  */
 .preview-fit {
-  height: min(46vh, calc((100vw - 1.5rem) * var(--preview-ar, 1)));
+  height: min(34vh, calc((100vw - 1.5rem) * var(--preview-ar, 1)));
   width: auto;
+}
+
+@media (max-height: 700px) {
+  .preview-fit {
+    height: min(30vh, calc((100vw - 1.5rem) * var(--preview-ar, 1)));
+  }
 }
 
 @media (min-width: 1024px) {

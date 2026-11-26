@@ -158,6 +158,7 @@ export function drawPreview(opts: DrawOptions): boolean {
     return false;
   }
 
+  // 얼굴 트랙은 원본 영상 시간, 직접 지정한 모자이크 영역은 편집본(합산) 시간 기준이다.
   const tSrc = opts.tSource; // 얼굴 트랙·수동 영역은 원본 영상 시간 기준
 
   if (spec.masks.enabled) {
@@ -177,7 +178,7 @@ export function drawPreview(opts: DrawOptions): boolean {
         spec.masks.mode, spec.masks.strength, spec.masks.shape);
     }
     for (const m of spec.masks.manual) {
-      if (tSrc < m.start - 1e-6 || tSrc > m.end + 1e-6) continue;
+      if (opts.t < m.start - 1e-6 || opts.t > m.end + 1e-6) continue;
       applyEffect(ctx, geo.outW, geo.outH,
         {
           x: m.x * projectWidth - geo.cropX,

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import type { PointerEvent as ReactPointerEvent, RefObject } from 'react';
+import type { MutableRefObject, PointerEvent as ReactPointerEvent } from 'react';
 import type {
-  EditSpec, HookTitle, ImageSticker, OverlayState, PersonTrack, ProjectMeta, SubtitleState, MaskState,
+  EditSpec, HookTitle, ImageSticker, OverlayState, PersonTrack, ProjectMeta, SubtitleState, MaskState, VideoClip,
 } from '../types';
 import { outputGeometry } from '../lib/layout';
 import { drawPreview, toSourceNorm } from '../lib/preview';
@@ -10,7 +10,13 @@ import { formatTime } from '../lib/format';
 
 interface Props {
   project: ProjectMeta;
-  videoRef: RefObject<HTMLVideoElement | null>;
+  /** 타임라인에 올린 클립들(순서대로) */
+  clips: VideoClip[];
+  /** 지금 미리보기에 나오는 클립 */
+  activeIndex: number;
+  /** 클립 id → 미리보기 <video> 요소 (App 이 재생 제어에 함께 쓴다) */
+  videoEls: MutableRefObject<Map<string, HTMLVideoElement>>;
+  /** 편집본(합산) 시간 — 0초가 편집본 시작 */
   time: number;
   trim: { start: number; end: number };
   aspect: EditSpec['aspect'];
@@ -41,7 +47,9 @@ interface Rect {
 
 export default function PreviewStage({
   project,
-  videoRef,
+  clips,
+  activeIndex,
+  videoEls,
   time,
   trim,
   aspect,
@@ -71,6 +79,10 @@ export default function PreviewStage({
   const dragStart = useRef<{ x: number; y: number } | null>(null);
   const stickerDrag = useRef<{ id: string; dx: number; dy: number } | null>(null);
 
+  const activeClip = clips[Math.max(0, Math.min(clips.length - 1, activeIndex))] ?? null;
+  const activeId = activeClip?.id ?? null;
+  const currentVideo = () => (activeId ? videoEls.current.get(activeId) ?? null : null);
+
   const geo = useMemo(() => outputGeometry(project.width, project.height, aspect), [project, aspect]);
   const tTimeline = Math.max(0, Math.min(time - trim.start, Math.max(0.001, trim.end - trim.start)));
 
@@ -99,24 +111,25 @@ export default function PreviewStage({
     (overrideTime?: number) => {
       const canvas = canvasRef.current;
       if (!canvas) return;
+      const video = currentVideo();
       // 재생 프레임 루프에서는 state 가 아닌 실제 영상 시간을 넘겨 그린다.
-      const tSource = overrideTime ?? time;
-      const tClip = Math.max(0, Math.min(tSource - trim.start, Math.max(0.001, trim.end - trim.start)));
+      const tClip = Math.max(0, Math.min(overrideTime ?? time, Math.max(0.001, trim.end - trim.start)));
       const drew = drawPreview({
         canvas,
-        video: videoRef.current,
+        video,
         projectWidth: project.width,
         projectHeight: project.height,
         spec,
         tracks,
         t: tClip,
-        tSource,
+        tSource: video?.currentTime ?? 0,
         dragBox: drag,
         selectedStickerId,
       });
       setPainted((prev) => (prev === drew ? prev : drew));
     },
-    [project, spec, tracks, trim.start, trim.end, time, drag, videoRef, selectedStickerId],
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [project.width, project.height, spec, tracks, trim.start, trim.end, time, drag, activeId, selectedStickerId, videoEls],
   );
 
   const renderRef = useRef(render);
@@ -127,10 +140,11 @@ export default function PreviewStage({
   useEffect(() => {
     // 재생 중에는 아래 프레임 루프가 매 프레임 그리므로, 늦은 state 시간으로 다시 그려
     // 화면이 튀지 않도록 건너뛴다.
-    const v = videoRef.current;
+    const v = currentVideo();
     if (v && !v.paused && !v.ended) return;
     render();
-  }, [render, fontsTick, seekTick, videoRef]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [render, fontsTick, seekTick]);
 
   // 재생 중에는 requestAnimationFrame 으로 매 프레임 미리보기를 그린다.
   // (timeupdate 는 1초에 몇 번만 오기 때문에 캔버스가 멈춘 것처럼 보였다 → iOS 재생 안 됨의 원인)
@@ -139,13 +153,13 @@ export default function PreviewStage({
     let alive = true;
     const loop = () => {
       if (!alive) return;
-      const video = videoRef.current;
+      const video = currentVideo();
       if (video && !video.paused && !video.ended) {
         renderRef.current(video.currentTime);
       }
       raf = window.requestAnimationFrame(loop);
     };
-    const video = videoRef.current;
+    const video = currentVideo();
     if (playing || (video && !video.paused && !video.ended)) {
       raf = window.requestAnimationFrame(loop);
     }
@@ -153,15 +167,22 @@ export default function PreviewStage({
       alive = false;
       if (raf) window.cancelAnimationFrame(raf);
     };
-  }, [playing, videoRef]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [playing, activeId]);
+
+  // 클립이 바뀌면 한 번 더 그린다.
+  useEffect(() => {
+    setVideoError(null);
+    setPainted(false);
+    setSeekTick((v) => v + 1);
+  }, [activeId]);
 
   // iOS Safari 는 currentTime 0 프레임을 디코딩하지 않는 경우가 있어
   // 메타데이터가 오면 아주 살짝 seek 해서 첫 프레임을 강제로 만든다.
   useEffect(() => {
-    const video = videoRef.current;
+    const video = currentVideo();
     if (!video) return;
     setVideoError(null);
-    setPainted(false);
     // iOS Safari 인라인 재생 속성(React 가 모르는 attribute 는 직접 지정)
     ['playsinline', 'webkit-playsinline', 'x5-playsinline', 'disablepictureinpicture'].forEach((name) => {
       video.setAttribute(name, 'true');
@@ -209,7 +230,8 @@ export default function PreviewStage({
       events.forEach(([name, fn]) => video.removeEventListener(name, fn));
       retries.forEach((id) => window.clearTimeout(id));
     };
-  }, [videoRef, project.id]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeId]);
 
   // 스티커 이미지가 늦게 디코딩되면 한 번 더 그린다.
   useEffect(() => {
@@ -300,7 +322,7 @@ export default function PreviewStage({
 
   return (
     <div className="relative flex flex-col lg:h-full lg:min-h-0">
-      <div className="flex items-center justify-center p-2 sm:p-4 lg:min-h-0 lg:flex-1 lg:overflow-hidden">
+      <div className="flex items-center justify-center p-1.5 sm:p-4 lg:min-h-0 lg:flex-1 lg:overflow-hidden">
         <div
           ref={wrapRef}
           className="preview-fit relative mx-auto max-w-full lg:w-auto"
@@ -314,14 +336,23 @@ export default function PreviewStage({
             className="relative h-full w-full overflow-hidden rounded-xl border border-studio-700 bg-black shadow-[0_20px_60px_-20px_rgba(0,0,0,0.9)]"
             style={{ maxHeight: '100%' }}
           >
-            {/* iOS Safari 폴백: 캔버스가 아직 첫 프레임을 못 그렸을 때 영상 자체가 보인다. */}
-            <video
-              ref={videoRef}
-              src={project.srcUrl}
-              playsInline
-              preload="auto"
-              className="pointer-events-none absolute inset-0 h-full w-full object-contain"
-            />
+            {/* 클립마다 <video> 하나 — 지금 클립만 재생하고 나머지는 미리 불러만 둔다 */}
+            {clips.map((clip, i) => (
+              <video
+                key={clip.id}
+                ref={(el) => {
+                  // 매 렌더마다 콜백이 새로 만들어지므로 null 일 때는 지우지 않는다.
+                  // (지우면 같은 커밋 안에서 잠깐 사라져 재생 제어가 끊길 수 있다)
+                  if (el) videoEls.current.set(clip.id, el);
+                }}
+                src={clip.url}
+                playsInline
+                preload="auto"
+                className={`pointer-events-none absolute inset-0 h-full w-full object-contain ${
+                  i === activeIndex ? 'opacity-100' : 'opacity-0'
+                }`}
+              />
+            ))}
             <canvas
               ref={canvasRef}
               onPointerDown={onPointerDown}
@@ -342,6 +373,11 @@ export default function PreviewStage({
               <span className="rounded-md bg-black/60 px-1.5 py-0.5 text-[10px] font-semibold tabular-nums text-white/80 backdrop-blur">
                 {geo.outW}×{geo.outH}
               </span>
+              {clips.length > 1 ? (
+                <span className="rounded-md bg-black/60 px-1.5 py-0.5 text-[10px] font-semibold tabular-nums text-white/80 backdrop-blur">
+                  클립 {activeIndex + 1}/{clips.length}
+                </span>
+              ) : null}
               {subtitles.enabled && subtitles.cues.length > 0 ? (
                 <span className="rounded-md bg-neon/80 px-1.5 py-0.5 text-[10px] font-semibold text-white">자막 {subtitles.cues.length}</span>
               ) : null}
