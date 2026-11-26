@@ -190,7 +190,7 @@ export default function App() {
 
   // ---------------------------------------------------------------- 오디오 레이어(BGM·효과음)
   /** 편집본 시간(clipTime)에 맞춰 오디오 레이어를 재생·정지·보정한다. */
-  const syncAudioPreview = useCallback((clipTime: number, playingNow: boolean) => {
+  const syncAudioPreview = useCallback((clipTime: number, playingNow: boolean, forceSeek = false) => {
     const els = audioElsRef.current;
     for (const layer of audioLayersRef.current) {
       const el = els.get(layer.id);
@@ -211,7 +211,8 @@ export default function App() {
         }
         continue;
       }
-      if (Math.abs(el.currentTime - wantTime) > 0.3) {
+      // 출발·재개 시에는 정확한 위치로 맞춘 뒤 재생한다(처음 어긋나면 계속 어긋난다).
+      if (el.paused || forceSeek || Math.abs(el.currentTime - wantTime) > 0.2) {
         try {
           el.currentTime = wantTime;
         } catch {
@@ -399,6 +400,8 @@ export default function App() {
     const onPlay = () => {
       setPlaying(true);
       startFollow();
+      // 영상이 실제로 출발한 순간 오디오 레이어 위치를 한 번 강제로 맞춘다.
+      syncAudioPreview(video.currentTime - trim.start, true, true);
     };
     const onPause = () => {
       setPlaying(false);

@@ -229,13 +229,16 @@ export async function exportVideo(params: ExportParams): Promise<ExportResult> {
   /** 클립 현재 시각(clipNow)을 기준으로 각 레이어를 AudioContext 시간에 맞춰 예약 재생한다. */
   const startLayerAudio = (clipNow: number) => {
     if (!actx || !dest) return;
-    const base = actx.currentTime + 0.06;
+    const lead = 0.03;
+    const base = actx.currentTime + lead;
+    // 예약 시각(base)에 클립이 어디까지 갔는지로 오프셋을 계산해야 소리가 밀리지 않는다.
+    const clipAtBase = clipNow + lead;
     for (const layer of audioLayers) {
       const buf = buffers.get(layer.id);
       if (!buf) continue;
-      const rel = clipNow - layer.start;
+      const rel = clipAtBase - layer.start;
       if (rel >= layer.length) continue;
-      const when = base + Math.max(0, layer.start - clipNow);
+      const when = base + Math.max(0, layer.start - clipAtBase);
       const offset = layer.offset + Math.max(0, rel);
       if (offset >= buf.duration) continue;
       const dur = Math.min(layer.length - Math.max(0, rel), buf.duration - offset);
