@@ -235,6 +235,7 @@ export default function App() {
       } catch {
         /* ignore */
       }
+      el.remove();
       els.delete(id);
     });
     audioLayers.forEach((layer) => {
@@ -242,6 +243,11 @@ export default function App() {
       const el = new Audio();
       el.preload = 'auto';
       el.src = layer.src;
+      // 문서에 붙여 둔다(분리된 미디어 요소는 iOS Safari 에서 재생 중 GC 될 수 있다). 화면에는 보이지 않는다.
+      el.style.display = 'none';
+      el.setAttribute('aria-hidden', 'true');
+      el.dataset.audioLayer = layer.id;
+      document.body.appendChild(el);
       els.set(layer.id, el);
     });
     const video = videoRef.current;
@@ -260,6 +266,7 @@ export default function App() {
       audioElsRef.current.forEach((el) => {
         el.pause();
         el.removeAttribute('src');
+        el.remove();
       });
       audioElsRef.current.clear();
     },
