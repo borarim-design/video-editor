@@ -259,8 +259,8 @@ export default function PreviewStage({
       <div className="flex items-center justify-center p-2 sm:p-4 lg:min-h-0 lg:flex-1 lg:overflow-hidden">
         <div
           ref={wrapRef}
-          className="relative max-h-full"
-          style={{ aspectRatio: `${geo.outW} / ${geo.outH}`, width: '100%', maxWidth: '100%' }}
+          className="relative w-full lg:h-full lg:w-auto lg:max-w-full"
+          style={{ aspectRatio: `${geo.outW} / ${geo.outH}`, maxHeight: '100%' }}
         >
           <div
             className="relative h-full w-full overflow-hidden rounded-xl border border-studio-700 bg-black shadow-[0_20px_60px_-20px_rgba(0,0,0,0.9)]"

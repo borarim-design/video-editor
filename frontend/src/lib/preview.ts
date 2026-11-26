@@ -492,12 +492,23 @@ export function drawHook(
   const decor = hookDecorOf(hook);
 
   ctx.save();
-  ctx.font = `400 ${fontPx}px "${family}", "Malgun Gothic", sans-serif`;
-  const measureMain = (text: string) => (text ? ctx.measureText(text).width : 0);
-  ctx.font = `400 ${subPx}px "${family}", "Malgun Gothic", sans-serif`;
-  const measureSub = (text: string) => (text ? ctx.measureText(text).width : 0);
+  // 주의: measureMain/measureSub 는 호출 시점의 ctx.font 를 쓰므로
+  // 각 함수 안에서 폰트를 다시 지정한다(예전엔 서브 폰트로 본문을 재던 버그가 있었다).
+  const mainFont = `400 ${fontPx}px "${family}", "Malgun Gothic", sans-serif`;
+  const subFont = `400 ${subPx}px "${family}", "Malgun Gothic", sans-serif`;
+  const measureMain = (text: string) => {
+    if (!text) return 0;
+    ctx.font = mainFont;
+    return ctx.measureText(text).width;
+  };
+  const measureSub = (text: string) => {
+    if (!text) return 0;
+    ctx.font = subFont;
+    return ctx.measureText(text).width;
+  };
 
   const lay = computeHookLayout(hook, W, H, measureMain, measureSub);
+  ctx.font = mainFont;
 
   if (lay.box) {
     ctx.fillStyle = rgba(hook.boxColor, hook.boxOpacity);
