@@ -614,8 +614,10 @@ export function drawHook(
       ctx.fill();
     }
 
+    // 라벨 박스 줄은 검정 박스 위 흰 글씨라 외곽선을 빼야 글자가 뭉개지지 않는다.
+    const lineStroke = decor.labelBox && isLast ? 0 : strokeW;
     drawWordsCentered(ctx, line.text, 0, lay.fontPx * 0.35, lay.fontPx,
-      color, strokeW, hook.strokeColor, family, bracketAccent);
+      color, lineStroke, hook.strokeColor, family, bracketAccent);
     ctx.restore();
   });
   ctx.restore();

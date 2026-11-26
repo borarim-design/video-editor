@@ -192,8 +192,8 @@ export const HOOK_PRESETS: HookPresetDef[] = [
     sampleSub: '푸른끼 빼주는',
     style: {
       yPercent: 38, fontSize: 7.2, subSize: 2.4, color: '#8CF0A2', accent: '#8CF0A2',
-      accentLine: 0, strokeColor: '#FFFFFF', strokeWidth: 0.26, skew: 0,
-      font: 'jua', weight: 'regular', lineHeight: 1.32,
+      accentLine: 0, strokeColor: '#FFFFFF', strokeWidth: 0.14, skew: 0,
+      font: 'jua', weight: 'regular', lineHeight: 1.45,
       pillColor: '#FFFFFF', pillOpacity: 0.95, subColor: '#111111', boxOpacity: 0,
       decor: {
         ...DEFAULT_DECOR,
@@ -211,7 +211,7 @@ export const HOOK_PRESETS: HookPresetDef[] = [
     sampleSub: '미감좋은 언니들 꼭 다 모였다',
     style: {
       yPercent: 58, fontSize: 6.2, subSize: 2.2, color: '#FFFFFF', accent: '#FFFFFF',
-      accentLine: 0, strokeColor: '#3A2A22', strokeWidth: 0.09, skew: -2.5,
+      accentLine: 0, strokeColor: '#4A3428', strokeWidth: 0.045, skew: -2.5,
       font: 'nanumpen', weight: 'regular', lineHeight: 1.75,
       pillColor: '#FFFFFF', pillOpacity: 0.93, subColor: '#2A2118', boxOpacity: 0,
       decor: {
@@ -230,7 +230,7 @@ export const HOOK_PRESETS: HookPresetDef[] = [
     sampleSub: '한지 멋집부터|노출 카페까지',
     style: {
       yPercent: 62, fontSize: 6.0, subSize: 2.1, color: '#FFFFFF', accent: '#6BE8D8',
-      accentLine: 0, strokeColor: '#0E3B36', strokeWidth: 0.17, skew: 0,
+      accentLine: 0, strokeColor: '#0E3B36', strokeWidth: 0.07, skew: 0,
       font: 'pretendard', weight: 'extrabold', lineHeight: 1.3,
       pillColor: '#FFFFFF', pillOpacity: 0.74, subColor: '#1B2A28', boxOpacity: 0,
     },
@@ -240,7 +240,8 @@ export const HOOK_PRESETS: HookPresetDef[] = [
 export function applyHookPreset(hook: HookTitle, preset: HookPreset): HookTitle {
   const def = HOOK_PRESETS.find((p) => p.id === preset);
   if (!def) return { ...hook, preset };
-  const decor = def.style.decor ?? hook.decor;
+  // 프리셋을 고르면 이전 프리셋의 장식(바·라벨 박스)은 지우고, 이 프리셋의 장식만 남긴다.
+  const decor = def.style.decor ?? DEFAULT_DECOR;
   return {
     ...hook,
     ...def.style,
@@ -249,7 +250,7 @@ export function applyHookPreset(hook: HookTitle, preset: HookPreset): HookTitle 
     decor: {
       ...DEFAULT_DECOR,
       ...decor,
-      barColors: decor?.barColors?.length ? [...decor.barColors] : [...DEFAULT_DECOR.barColors],
+      barColors: decor.barColors?.length ? [...decor.barColors] : [...DEFAULT_DECOR.barColors],
     },
   };
 }
