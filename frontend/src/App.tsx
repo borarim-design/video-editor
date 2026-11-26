@@ -575,7 +575,8 @@ export default function App() {
   const addMosaicQuick = useCallback(() => {
     if (!project) return;
     const total = project.duration;
-    const start = Math.max(0, Math.min(time, Math.max(0, total - 0.3)));
+    // 지금 시점을 포함하도록 0.1초 단위로 내림(올림하면 방금 만든 영역이 아직 구간 밖이 된다).
+    const start = Math.max(0, Math.min(Math.floor(time * 10) / 10, Math.max(0, total - 0.3)));
     const end = Math.min(total, start + 3);
     const mask: ManualMask = {
       id: uid('mask'),
