@@ -16,6 +16,8 @@ interface Props {
   masks: MaskState;
   stickers: ImageSticker[];
   overlays: OverlayState;
+  audioCount: number;
+  videoVolume: number;
   exporting: boolean;
   progress: number;
   message: string;
@@ -35,6 +37,8 @@ export default function ExportPanel({
   masks,
   stickers,
   overlays,
+  audioCount,
+  videoVolume,
   exporting,
   progress,
   message,
@@ -90,6 +94,7 @@ export default function ExportPanel({
               overlays.placeCard.enabled ? '장소 카드' : null,
             ].filter(Boolean).join(' · ') || '없음'],
             ['모자이크', masks.enabled ? `직접 ${manualCount}곳 · ${masks.mode === 'blur' ? '블러' : '모자이크'} ${masks.strength}% · ${masks.shape === 'rect' ? '사각형' : masks.shape === 'ellipse' ? '타원' : '원형'}` : '없음'],
+            ['오디오', `${audioCount ? `레이어 ${audioCount}개` : '추가 없음'} · 원본 ${Math.round(videoVolume * 100)}%`],
             ['원본', `${project.width}×${project.height} · ${project.fps.toFixed(2)}fps`],
           ].map(([k, v]) => (
             <div key={k} className="flex items-baseline justify-between gap-3 border-b border-studio-800/70 pb-1.5 last:border-0">

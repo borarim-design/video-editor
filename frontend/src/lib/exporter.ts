@@ -8,7 +8,7 @@
  * 결과물: 브라우저가 MP4 녹화를 지원하면 MP4(video/mp4), 아니면 WebM(video/webm).
  * 그리는 함수는 미리보기와 동일한 drawPreview() 를 쓰므로 결과가 화면과 일치한다.
  */
-import type { EditSpec, ExportResult, PersonTrack } from '../types';
+import type { AudioLayer, EditSpec, ExportResult, PersonTrack } from '../types';
 import { drawPreview } from './preview';
 import { preloadStickerImages } from './stickers';
 import { outputGeometry } from './layout';
@@ -30,6 +30,10 @@ export interface ExportParams {
   tracks: PersonTrack[];
   trim: { start: number; end: number };
   hasAudio: boolean;
+  /** 추가 오디오 레이어(BGM·효과음) — 원본 영상 소리와 함께 믹싱한다. */
+  audioLayers?: AudioLayer[];
+  /** 원본 영상 소리 크기(0~1) */
+  videoVolume?: number;
   fps: number;
   fileBaseName?: string;
   onProgress?: (ratio: number, message: string) => void;
@@ -37,18 +41,17 @@ export interface ExportParams {
   onCancelReady?: (cancel: () => void) => void;
 }
 
-interface AudioGraph {
+interface AudioSourceCache {
   ctx: AudioContext;
   source: MediaElementAudioSourceNode;
-  dest: MediaStreamAudioDestinationNode;
 }
 
 /** createMediaElementSource 는 요소당 한 번만 만들 수 있어 WeakMap 에 보관한다. */
-const audioGraphs = new WeakMap<HTMLVideoElement, AudioGraph>();
+const audioSources = new WeakMap<HTMLVideoElement, AudioSourceCache>();
 
-function ensureAudioGraph(video: HTMLVideoElement): AudioGraph | null {
+function ensureAudioSource(video: HTMLVideoElement): AudioSourceCache | null {
   try {
-    const existing = audioGraphs.get(video);
+    const existing = audioSources.get(video);
     if (existing) return existing;
     const Ctor =
       window.AudioContext ??
@@ -56,15 +59,37 @@ function ensureAudioGraph(video: HTMLVideoElement): AudioGraph | null {
     if (!Ctor) return null;
     const ctx = new Ctor();
     const source = ctx.createMediaElementSource(video);
-    const dest = ctx.createMediaStreamDestination();
-    // 스피커로는 보내지 않는다(내보내는 동안 소리가 나지 않게). 스트림으로만 흘려보낸다.
-    source.connect(dest);
-    const graph: AudioGraph = { ctx, source, dest };
-    audioGraphs.set(video, graph);
-    return graph;
+    const cache: AudioSourceCache = { ctx, source };
+    audioSources.set(video, cache);
+    return cache;
   } catch {
     return null;
   }
+}
+
+/** blob: 오디오 파일을 AudioBuffer 로 디코딩(콜백·Promise 두 방식 모두 지원). */
+function decodeAudio(ctx: AudioContext, data: ArrayBuffer): Promise<AudioBuffer> {
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    const ok = (buf: AudioBuffer) => {
+      if (!settled) {
+        settled = true;
+        resolve(buf);
+      }
+    };
+    const fail = (err: unknown) => {
+      if (!settled) {
+        settled = true;
+        reject(err instanceof Error ? err : new Error('오디오를 해석하지 못했습니다.'));
+      }
+    };
+    try {
+      const maybe = ctx.decodeAudioData(data, ok, fail);
+      if (maybe && typeof maybe.then === 'function') maybe.then(ok).catch(fail);
+    } catch (err) {
+      fail(err);
+    }
+  });
 }
 
 const AUDIO_CODECS = ['video/mp4;codecs=avc1.42E01E,mp4a.40.2', 'video/mp4;codecs=avc1.4D401F,mp4a.40.2', 'video/mp4;codecs=h264,aac', 'video/mp4', 'video/webm;codecs=vp9,opus', 'video/webm;codecs=vp8,opus', 'video/webm'];
@@ -161,15 +186,74 @@ export async function exportVideo(params: ExportParams): Promise<ExportResult> {
   // 스티커 이미지가 디코딩되기 전에 녹화가 시작되면 빈 프레임이 찍히므로 먼저 불러온다.
   await preloadStickerImages(spec.stickers ?? []);
 
-  // ---- 오디오(Web Audio) ----
-  const graph = hasAudio ? ensureAudioGraph(video) : null;
-  if (graph) {
+  // ---- 오디오(Web Audio): 원본 영상 소리 + 추가 오디오 레이어를 하나의 스트림으로 믹싱 ----
+  const audioLayers = (params.audioLayers ?? []).filter((l) => l.enabled);
+  const videoVolume = clamp(params.videoVolume ?? 1, 0, 1);
+  const wantAudio = (hasAudio && videoVolume > 0) || audioLayers.length > 0;
+  const audioCache = wantAudio ? ensureAudioSource(video) : null;
+  const actx = audioCache?.ctx ?? null;
+  let dest: MediaStreamAudioDestinationNode | null = null;
+  const buffers = new Map<string, AudioBuffer>();
+  const layerNodes: AudioBufferSourceNode[] = [];
+
+  if (actx && audioCache) {
     try {
-      await graph.ctx.resume();
+      await actx.resume();
     } catch {
       /* 사용자 조작 후 다시 시도된다 */
     }
+    dest = actx.createMediaStreamDestination();
+    if (hasAudio) {
+      // 스피커로는 보내지 않는다(내보내는 동안 소리가 나지 않게). 스트림으로만 흘려보낸다.
+      const videoGain = actx.createGain();
+      videoGain.gain.value = videoVolume;
+      try {
+        audioCache.source.disconnect();
+      } catch {
+        /* ignore */
+      }
+      audioCache.source.connect(videoGain);
+      videoGain.connect(dest);
+    }
+    for (const layer of audioLayers) {
+      try {
+        const res = await fetch(layer.src);
+        const data = await res.arrayBuffer();
+        buffers.set(layer.id, await decodeAudio(actx, data));
+      } catch {
+        /* 해석하지 못한 레이어는 내보내기에서 빠진다 */
+      }
+    }
   }
+
+  /** 클립 현재 시각(clipNow)을 기준으로 각 레이어를 AudioContext 시간에 맞춰 예약 재생한다. */
+  const startLayerAudio = (clipNow: number) => {
+    if (!actx || !dest) return;
+    const base = actx.currentTime + 0.06;
+    for (const layer of audioLayers) {
+      const buf = buffers.get(layer.id);
+      if (!buf) continue;
+      const rel = clipNow - layer.start;
+      if (rel >= layer.length) continue;
+      const when = base + Math.max(0, layer.start - clipNow);
+      const offset = layer.offset + Math.max(0, rel);
+      if (offset >= buf.duration) continue;
+      const dur = Math.min(layer.length - Math.max(0, rel), buf.duration - offset);
+      if (dur <= 0.01) continue;
+      const gain = actx.createGain();
+      gain.gain.value = layer.muted ? 0 : clamp(layer.volume, 0, 1);
+      const node = actx.createBufferSource();
+      node.buffer = buf;
+      node.connect(gain);
+      gain.connect(dest);
+      try {
+        node.start(when, offset, dur);
+        layerNodes.push(node);
+      } catch {
+        /* ignore */
+      }
+    }
+  };
 
   // ---- 캔버스 + 오디오 → 하나의 MediaStream ----
   const canvasEl = canvas as HTMLCanvasElement & { captureStream?: (fps?: number) => MediaStream };
@@ -180,7 +264,7 @@ export async function exportVideo(params: ExportParams): Promise<ExportResult> {
 
   const stream = new MediaStream();
   canvasStream.getVideoTracks().forEach((t) => stream.addTrack(t));
-  const audioTrack = graph?.dest.stream.getAudioTracks()[0] ?? null;
+  const audioTrack = dest?.stream.getAudioTracks()[0] ?? null;
   if (audioTrack) stream.addTrack(audioTrack);
 
   const mimeType = pickMimeType(Boolean(audioTrack));
@@ -235,6 +319,13 @@ export async function exportVideo(params: ExportParams): Promise<ExportResult> {
     stopped = true;
     window.clearTimeout(watchdog);
     if (rafId) window.cancelAnimationFrame(rafId);
+    layerNodes.forEach((node) => {
+      try {
+        node.stop();
+      } catch {
+        /* ignore */
+      }
+    });
     try {
       video.pause();
     } catch {
@@ -302,9 +393,9 @@ export async function exportVideo(params: ExportParams): Promise<ExportResult> {
     throw new Error('브라우저가 영상 재생을 막았습니다. 화면을 한 번 누른 뒤 다시 내보내 주세요.');
   }
 
-  if (graph) {
+  if (actx) {
     try {
-      await graph.ctx.resume();
+      await actx.resume();
     } catch {
       /* ignore */
     }
@@ -334,6 +425,8 @@ export async function exportVideo(params: ExportParams): Promise<ExportResult> {
   }
 
   schedule();
+  // 레이어는 녹화 시작 순간의 클립 시각을 기준으로 예약한다(앞부분이 이미 지나갔으면 그만큼 건너뛴다).
+  startLayerAudio(video.currentTime - start);
 
   let blob: Blob | null = null;
   try {

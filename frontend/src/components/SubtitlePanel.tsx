@@ -1,3 +1,4 @@
+import { useEffect, useRef, useState } from 'react';
 import type { Cue, FontFamily, Preset, SubtitleState, SubtitleStyle } from '../types';
 import { PRESETS } from '../lib/presets';
 import { fontFamilyName } from '../lib/fonts';
@@ -8,12 +9,14 @@ interface Props {
   subtitles: SubtitleState;
   fonts: FontFamily[];
   currentTime: number;
+  selectedCueId: string | null;
   onStyle: (patch: Partial<SubtitleStyle>) => void;
   onPreset: (preset: Preset) => void;
   onToggle: (v: boolean) => void;
   onCueChange: (id: string, patch: Partial<Cue>) => void;
   onCueDelete: (id: string) => void;
-  onCueAdd: () => void;
+  onCueAdd: () => string;
+  onSelectCue: (id: string | null) => void;
   onSeek: (t: number) => void;
 }
 
@@ -21,26 +24,134 @@ export default function SubtitlePanel({
   subtitles,
   fonts,
   currentTime,
+  selectedCueId,
   onStyle,
   onPreset,
   onToggle,
   onCueChange,
   onCueDelete,
   onCueAdd,
+  onSelectCue,
   onSeek,
 }: Props) {
   const { style, cues, enabled } = subtitles;
   const family = fonts.find((f) => f.id === style.font) || fonts[0];
   const weights = family?.weights ?? ['regular'];
+  const [flashId, setFlashId] = useState<string | null>(null);
+  const flashTimer = useRef<number | null>(null);
 
   const activeCue = cues.find((c) => c.start <= currentTime && currentTime <= c.end);
 
+  const scrollToCue = (id: string) => {
+    const el = document.getElementById(`cue-row-${id}`);
+    el?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+  };
+
+  // 타임라인 등에서 자막이 선택되면 해당 행으로 스크롤한다.
+  useEffect(() => {
+    if (selectedCueId) scrollToCue(selectedCueId);
+  }, [selectedCueId]);
+
+  useEffect(
+    () => () => {
+      if (flashTimer.current) window.clearTimeout(flashTimer.current);
+    },
+    [],
+  );
+
+  const handleAdd = () => {
+    const id = onCueAdd();
+    onSelectCue(id);
+    setFlashId(id);
+    if (flashTimer.current) window.clearTimeout(flashTimer.current);
+    flashTimer.current = window.setTimeout(() => setFlashId((cur) => (cur === id ? null : cur)), 2000);
+    window.setTimeout(() => scrollToCue(id), 60);
+  };
+
   return (
     <div className="scroll-thin h-full overflow-y-auto">
+      {/* 최상단 고정: 탭을 열자마자 자막을 추가할 수 있어야 한다. */}
+      <div className="sticky top-0 z-20 space-y-1.5 border-b border-studio-700/60 bg-studio-900/95 px-4 py-3 backdrop-blur">
+        <button type="button" onClick={handleAdd} className="btn-primary min-h-[44px] w-full text-sm">
+          ➕ 자막 추가
+          <span className="text-[11px] font-medium opacity-80">현재 {formatTime(currentTime, false)}</span>
+        </button>
+        <Toggle label="자막 표시" checked={enabled} onChange={onToggle} />
+      </div>
+
+      <Section
+        title={`자막 목록 (${cues.length})`}
+        description="행을 누르면 그 시점으로 이동합니다. 텍스트·시간을 직접 고칠 수 있어요."
+      >
+        <div className="space-y-1.5">
+          {cues.length === 0 ? (
+            <p className="rounded-lg border border-dashed border-studio-700 px-3 py-6 text-center text-[11px] text-studio-400">
+              아직 자막이 없습니다. 위의 <span className="font-semibold text-studio-200">➕ 자막 추가</span> 를 누르면 현재
+              재생 위치에 자막이 생겨요.
+            </p>
+          ) : null}
+          {cues.map((cue) => {
+            const isActive = activeCue?.id === cue.id;
+            const isSelected = selectedCueId === cue.id;
+            const isFlash = flashId === cue.id;
+            return (
+              <div
+                key={cue.id}
+                id={`cue-row-${cue.id}`}
+                onPointerDown={() => onSelectCue(cue.id)}
+                className={`rounded-lg border px-2 py-1.5 transition ${
+                  isFlash
+                    ? 'border-neon-amber bg-neon-amber/15 shadow-glow'
+                    : isSelected
+                      ? 'border-neon bg-neon/15'
+                      : isActive
+                        ? 'border-neon/70 bg-neon/10'
+                        : 'border-studio-700 bg-studio-800/40'
+                }`}
+              >
+                <div className="flex items-center gap-1.5">
+                  <button
+                    type="button"
+                    className="rounded bg-studio-700 px-1.5 py-0.5 font-mono text-[10px] tabular-nums text-studio-200 hover:bg-studio-600"
+                    onClick={() => onSeek(cue.start)}
+                  >
+                    {formatTime(cue.start, false)}
+                  </button>
+                  <span className="text-studio-500">→</span>
+                  <input
+                    className="w-16 rounded bg-studio-900/70 px-1 py-0.5 font-mono text-[10px] tabular-nums text-studio-200"
+                    defaultValue={timecodeInput(cue.end)}
+                    key={`${cue.id}-end-${cue.end}`}
+                    onBlur={(e) => {
+                      const v = parseTimecode(e.target.value);
+                      if (v != null && v > cue.start) onCueChange(cue.id, { end: v });
+                    }}
+                  />
+                  <button
+                    type="button"
+                    className="ml-auto rounded px-1.5 text-xs text-studio-400 hover:bg-neon-rose/20 hover:text-neon-rose"
+                    onClick={() => onCueDelete(cue.id)}
+                    aria-label="자막 삭제"
+                  >
+                    ✕
+                  </button>
+                </div>
+                <input
+                  className="mt-1 w-full rounded bg-transparent px-0.5 py-0.5 text-[12px] text-studio-100 outline-none focus:bg-studio-900/60"
+                  value={cue.text}
+                  onChange={(e) => onCueChange(cue.id, { text: e.target.value, words: [] })}
+                  placeholder="자막 문구"
+                />
+              </div>
+            );
+          })}
+        </div>
+      </Section>
+
       <Section
         title="AI 자동 자막"
         right={<Badge tone="warn">정적 모드</Badge>}
-        description="서버 없이 동작하는 GitHub Pages 모드입니다. 수동 자막은 아래에서 바로 추가·편집할 수 있어요."
+        description="서버 없이 동작하는 GitHub Pages 모드입니다. 수동 자막은 위의 ➕ 자막 추가 버튼으로 언제든 넣을 수 있어요."
       >
         <button
           type="button"
@@ -53,7 +164,6 @@ export default function SubtitlePanel({
         <p className="text-[11px] leading-relaxed text-studio-400">
           GitHub Pages 모드에서는 수동 자막·수동 모자이크를 지원하며, AI 자동 기능은 추후 서버 연결 시 활성화됩니다.
         </p>
-        <Toggle label="자막 표시" checked={enabled} onChange={onToggle} hint="끄면 미리보기·내보내기에서 모두 사라집니다." />
       </Section>
 
       <Section title="스타일 프리셋" description="릴스·숏츠에서 도는 요즘 스타일. 언제든 세부 조정 가능.">
@@ -182,68 +292,6 @@ export default function SubtitlePanel({
           />
           <span className="text-[11px] text-studio-300">배경 박스 색</span>
         </label>
-      </Section>
-
-      <Section
-        title={`자막 목록 (${cues.length})`}
-        right={
-          <button type="button" className="chip" onClick={onCueAdd}>
-            + 추가
-          </button>
-        }
-        description="행을 누르면 그 시점으로 이동합니다. 텍스트·시간을 직접 고칠 수 있어요."
-      >
-        <div className="space-y-1.5">
-          {cues.length === 0 ? (
-            <p className="rounded-lg border border-dashed border-studio-700 px-3 py-6 text-center text-[11px] text-studio-400">
-              아직 자막이 없습니다. 자동 생성하거나 직접 추가해 보세요.
-            </p>
-          ) : null}
-          {cues.map((cue) => {
-            const isActive = activeCue?.id === cue.id;
-            return (
-              <div
-                key={cue.id}
-                className={`rounded-lg border px-2 py-1.5 transition ${
-                  isActive ? 'border-neon/70 bg-neon/10' : 'border-studio-700 bg-studio-800/40'
-                }`}
-              >
-                <div className="flex items-center gap-1.5">
-                  <button
-                    type="button"
-                    className="rounded bg-studio-700 px-1.5 py-0.5 font-mono text-[10px] tabular-nums text-studio-200 hover:bg-studio-600"
-                    onClick={() => onSeek(cue.start)}
-                  >
-                    {formatTime(cue.start, false)}
-                  </button>
-                  <span className="text-studio-500">→</span>
-                  <input
-                    className="w-16 rounded bg-studio-900/70 px-1 py-0.5 font-mono text-[10px] tabular-nums text-studio-200"
-                    defaultValue={timecodeInput(cue.end)}
-                    key={`${cue.id}-end-${cue.end}`}
-                    onBlur={(e) => {
-                      const v = parseTimecode(e.target.value);
-                      if (v != null && v > cue.start) onCueChange(cue.id, { end: v });
-                    }}
-                  />
-                  <button
-                    type="button"
-                    className="ml-auto rounded px-1.5 text-xs text-studio-400 hover:bg-neon-rose/20 hover:text-neon-rose"
-                    onClick={() => onCueDelete(cue.id)}
-                    aria-label="자막 삭제"
-                  >
-                    ✕
-                  </button>
-                </div>
-                <input
-                  className="mt-1 w-full rounded bg-transparent px-0.5 py-0.5 text-[12px] text-studio-100 outline-none focus:bg-studio-900/60"
-                  value={cue.text}
-                  onChange={(e) => onCueChange(cue.id, { text: e.target.value, words: [] })}
-                />
-              </div>
-            );
-          })}
-        </div>
       </Section>
     </div>
   );

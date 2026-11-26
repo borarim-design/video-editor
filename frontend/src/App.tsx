@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type {
-  Aspect, Cue, DateCardOverlay, EditSpec, ExportResult, FontFamily, HookPreset, HookTitle, ImageSticker,
+  Aspect, AudioLayer, Cue, DateCardOverlay, EditSpec, ExportResult, FontFamily, HookPreset, HookTitle, ImageSticker,
   ManualMask, MaskState, OverlayState, PersonTrack, PlaceCardOverlay, Preset, ProjectMeta, SubtitleState,
   SubtitleStyle, ViewfinderOverlay,
 } from './types';
@@ -10,20 +10,22 @@ import {
 } from './lib/presets';
 import { ensureFontsLoaded, waitForFont, fontFamilyForStyle } from './lib/fonts';
 import { loadLocalVideo } from './lib/local-media';
+import { loadAudioFile } from './lib/audio';
 import { ExportCanceledError, exportVideo } from './lib/exporter';
 import { clamp, formatTime, uid } from './lib/format';
 import { forgetStickerImage, preloadStickerImages } from './lib/stickers';
 import TopBar from './components/TopBar';
 import UploadZone from './components/UploadZone';
 import PreviewStage from './components/PreviewStage';
-import Timeline from './components/Timeline';
+import TimelineTracks from './components/TimelineTracks';
 import SubtitlePanel from './components/SubtitlePanel';
 import MaskPanel from './components/MaskPanel';
 import ExportPanel from './components/ExportPanel';
 import HookPanel from './components/HookPanel';
 import OverlayPanel from './components/OverlayPanel';
+import AudioPanel from './components/AudioPanel';
 
-type Tab = 'title' | 'subtitle' | 'overlay' | 'mask' | 'export';
+type Tab = 'title' | 'subtitle' | 'overlay' | 'mask' | 'audio' | 'export';
 
 interface ExportState {
   busy: boolean;
@@ -59,6 +61,21 @@ export default function App() {
   const [tab, setTab] = useState<Tab>('subtitle');
   const [drawMode, setDrawMode] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
+  // iOS Safari 가 오디오 재생을 막아 음소거로 재생 중인 상태
+  const [audioBlocked, setAudioBlocked] = useState(false);
+  // 오디오 레이어(BGM·효과음) · 원본 영상 볼륨
+  const [audioLayers, setAudioLayers] = useState<AudioLayer[]>([]);
+  const [videoVolume, setVideoVolume] = useState(1);
+  const [videoMuted, setVideoMuted] = useState(false);
+  const [selectedCueId, setSelectedCueId] = useState<string | null>(null);
+  const [selectedAudioId, setSelectedAudioId] = useState<string | null>(null);
+  const audioElsRef = useRef<Map<string, HTMLAudioElement>>(new Map());
+  const audioLayersRef = useRef<AudioLayer[]>([]);
+  const audioInputRef = useRef<HTMLInputElement | null>(null);
+
+  useEffect(() => {
+    audioLayersRef.current = audioLayers;
+  }, [audioLayers]);
 
   const [upload, setUpload] = useState<{ busy: boolean; error: string | null }>({ busy: false, error: null });
   const [render, setRender] = useState<ExportState>(IDLE_EXPORT);
@@ -132,6 +149,15 @@ export default function App() {
       setSubtitles({ enabled: true, cues: [], style: DEFAULT_STYLE });
       setHook(DEFAULT_HOOK);
       setRender(IDLE_EXPORT);
+      setAudioBlocked(false);
+      setAudioLayers((cur) => {
+        cur.forEach((l) => URL.revokeObjectURL(l.src));
+        return [];
+      });
+      setVideoVolume(1);
+      setVideoMuted(false);
+      setSelectedCueId(null);
+      setSelectedAudioId(null);
       setTab('subtitle');
       setUpload({ busy: false, error: null });
     } catch (err) {
@@ -141,6 +167,15 @@ export default function App() {
 
   const resetProject = useCallback(() => {
     setPlaying(false);
+    setAudioBlocked(false);
+    setAudioLayers((cur) => {
+      cur.forEach((l) => URL.revokeObjectURL(l.src));
+      return [];
+    });
+    setVideoVolume(1);
+    setVideoMuted(false);
+    setSelectedCueId(null);
+    setSelectedAudioId(null);
     releaseResult();
     replaceProject(null);
     setTracks([]);
@@ -152,6 +187,91 @@ export default function App() {
     setUpload({ busy: false, error: null });
     setRender(IDLE_EXPORT);
   }, [releaseResult, replaceProject, clearStickers]);
+
+  // ---------------------------------------------------------------- 오디오 레이어(BGM·효과음)
+  /** 편집본 시간(clipTime)에 맞춰 오디오 레이어를 재생·정지·보정한다. */
+  const syncAudioPreview = useCallback((clipTime: number, playingNow: boolean) => {
+    const els = audioElsRef.current;
+    for (const layer of audioLayersRef.current) {
+      const el = els.get(layer.id);
+      if (!el) continue;
+      const rel = clipTime - layer.start;
+      const active = layer.enabled && rel >= -0.08 && rel < layer.length - 0.03;
+      const wantVolume = layer.muted ? 0 : clamp(layer.volume, 0, 1);
+      if (Math.abs(el.volume - wantVolume) > 0.01) el.volume = wantVolume;
+      const wantTime = layer.offset + Math.max(0, rel);
+      if (!active || !playingNow) {
+        if (!el.paused) el.pause();
+        if (active && Math.abs(el.currentTime - wantTime) > 0.15) {
+          try {
+            el.currentTime = wantTime;
+          } catch {
+            /* ignore */
+          }
+        }
+        continue;
+      }
+      if (Math.abs(el.currentTime - wantTime) > 0.3) {
+        try {
+          el.currentTime = wantTime;
+        } catch {
+          /* ignore */
+        }
+      }
+      if (el.paused) void el.play().catch(() => undefined);
+    }
+  }, []);
+
+  // 레이어 목록이 바뀌면 재생용 <audio> 요소를 만들고/지운다(화면에는 그리지 않는다).
+  useEffect(() => {
+    const els = audioElsRef.current;
+    const alive = new Set(audioLayers.map((l) => l.id));
+    els.forEach((el, id) => {
+      if (alive.has(id)) return;
+      el.pause();
+      el.removeAttribute('src');
+      try {
+        el.load();
+      } catch {
+        /* ignore */
+      }
+      els.delete(id);
+    });
+    audioLayers.forEach((layer) => {
+      if (els.has(layer.id)) return;
+      const el = new Audio();
+      el.preload = 'auto';
+      el.src = layer.src;
+      els.set(layer.id, el);
+    });
+    const video = videoRef.current;
+    if (video) syncAudioPreview(video.currentTime - trim.start, false);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [audioLayers, syncAudioPreview, trim.start]);
+
+  const pauseAllAudio = useCallback(() => {
+    audioElsRef.current.forEach((el) => {
+      if (!el.paused) el.pause();
+    });
+  }, []);
+
+  useEffect(
+    () => () => {
+      audioElsRef.current.forEach((el) => {
+        el.pause();
+        el.removeAttribute('src');
+      });
+      audioElsRef.current.clear();
+    },
+    [],
+  );
+
+  // 원본 영상 볼륨
+  useEffect(() => {
+    const video = videoRef.current;
+    if (!video) return;
+    video.volume = clamp(videoMuted ? 0 : videoVolume, 0, 1);
+  }, [videoVolume, videoMuted, project?.id]);
 
   // ---------------------------------------------------------------- 재생
   const seekTo = useCallback((t: number) => {
@@ -168,36 +288,145 @@ export default function App() {
     }
   }, [project]);
 
+  /**
+   * 재생 시작 — iOS Safari 는 play() 가 사용자 제스처 콜스택 안에서 동기로 불려야 하고,
+   * 오디오가 막히면(NotAllowedError) 음소거로 재시도해야 재생이 된다.
+   * 그래서 이 함수 안에서는 await·setTimeout·상태 업데이트를 거치지 않고 즉시 play() 를 부른다.
+   */
+  const startPlayback = useCallback(() => {
+    const video = videoRef.current;
+    if (!video) return;
+    const end = trim.end > trim.start ? trim.end : (project?.duration ?? 0);
+    // 끝(또는 트림 끝)에 붙어 있으면 처음으로 되감고 재생한다(끝 프레임에서는 play() 가 바로 끝난다).
+    if (video.ended || (end > 0 && video.currentTime >= end - 0.05)) {
+      try {
+        video.currentTime = trim.start;
+      } catch {
+        /* ignore */
+      }
+      setTime(trim.start);
+    }
+    const attempt = video.play();
+    // 같은 제스처 안에서 오디오 레이어도 함께 출발시킨다.
+    syncAudioPreview(video.currentTime - trim.start, true);
+    if (!attempt || typeof attempt.then !== 'function') return;
+    attempt.then(
+      () => {
+        if (video.muted) setAudioBlocked(true);
+      },
+      (err: unknown) => {
+        const name = err instanceof Error ? err.name : '';
+        if (name === 'NotSupportedError') {
+          showToast('브라우저가 이 영상 코덱을 재생하지 못합니다. MP4(H.264)로 변환해 주세요.');
+          return;
+        }
+        // iOS 자동재생/오디오 정책 → 음소거로 한 번 더 시도한다(음소거 재생은 허용된다).
+        video.muted = true;
+        setAudioBlocked(true);
+        const retry = video.play();
+        if (retry && typeof retry.catch === 'function') {
+          retry.catch(() => showToast('영상을 재생하지 못했어요. 재생 버튼을 한 번 더 눌러 주세요.'));
+        }
+      },
+    );
+  }, [project?.duration, trim.start, trim.end, showToast, syncAudioPreview]);
+
   const togglePlay = useCallback(() => {
     const video = videoRef.current;
     if (!video) return;
-    if (video.paused) {
-      void video.play().catch(() => showToast('재생할 수 없습니다.'));
-    } else {
-      video.pause();
-    }
-  }, [showToast]);
+    if (video.paused || video.ended) startPlayback();
+    else video.pause();
+  }, [startPlayback]);
 
+  const unmutePlayback = useCallback(() => {
+    const video = videoRef.current;
+    if (!video) return;
+    video.muted = false;
+    setAudioBlocked(false);
+  }, []);
+
+  // 재생 중에는 requestAnimationFrame 으로 영상 시간을 따라가며 UI 시간을 갱신하고,
+  // play/pause/ended/seeked 이벤트로 React 상태(isPlaying·currentTime)를 영상과 맞춘다.
   useEffect(() => {
     const video = videoRef.current;
     if (!video) return;
-    const onPlay = () => setPlaying(true);
-    const onPause = () => setPlaying(false);
-    const onTime = () => {
-      setTime(video.currentTime);
-      if (trim.end > trim.start && video.currentTime >= trim.end - 0.02) {
-        video.currentTime = trim.start;
+    const endOf = () => (trim.end > trim.start ? trim.end : (project?.duration ?? 0));
+    const enforceTrim = () => {
+      const end = endOf();
+      if (end > trim.start && video.currentTime >= end - 0.02) {
+        try {
+          video.currentTime = trim.start;
+        } catch {
+          /* ignore */
+        }
+        setTime(trim.start);
+        return true;
       }
+      return false;
+    };
+    let raf = 0;
+    let lastUi = 0;
+    const follow = (now: number) => {
+      raf = 0;
+      if (video.ended) {
+        setPlaying(false);
+        return;
+      }
+      if (enforceTrim()) {
+        // 트림 끝 → 시작점으로 되감아 이어서 재생
+        setTime(trim.start);
+      } else if (now - lastUi >= 100) {
+        lastUi = now;
+        setTime(video.currentTime);
+      }
+      syncAudioPreview(video.currentTime - trim.start, !video.paused && !video.ended);
+      raf = window.requestAnimationFrame(follow);
+    };
+    const startFollow = () => {
+      if (!raf) raf = window.requestAnimationFrame(follow);
+    };
+    const stopFollow = () => {
+      if (raf) window.cancelAnimationFrame(raf);
+      raf = 0;
+    };
+    const onPlay = () => {
+      setPlaying(true);
+      startFollow();
+    };
+    const onPause = () => {
+      setPlaying(false);
+      stopFollow();
+      setTime(video.currentTime);
+      syncAudioPreview(video.currentTime - trim.start, false);
+    };
+    const onEnded = () => {
+      setPlaying(false);
+      stopFollow();
+      setTime(video.currentTime);
+      syncAudioPreview(video.currentTime - trim.start, false);
+    };
+    const onTime = () => {
+      if (video.paused) setTime(video.currentTime);
+    };
+    const onSeeked = () => {
+      setTime(video.currentTime);
+      syncAudioPreview(video.currentTime - trim.start, !video.paused && !video.ended);
     };
     video.addEventListener('play', onPlay);
     video.addEventListener('pause', onPause);
+    video.addEventListener('ended', onEnded);
     video.addEventListener('timeupdate', onTime);
+    video.addEventListener('seeked', onSeeked);
+    if (!video.paused && !video.ended) startFollow();
     return () => {
+      stopFollow();
       video.removeEventListener('play', onPlay);
       video.removeEventListener('pause', onPause);
+      video.removeEventListener('ended', onEnded);
       video.removeEventListener('timeupdate', onTime);
+      video.removeEventListener('seeked', onSeeked);
     };
-  }, [project?.id, trim.start, trim.end]);
+  }, [project?.id, project?.duration, trim.start, trim.end, syncAudioPreview]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -246,7 +475,7 @@ export default function App() {
     setSubtitles((s) => ({ ...s, cues: s.cues.filter((c) => c.id !== id) }));
   }, []);
 
-  const addCue = useCallback(() => {
+  const addCue = useCallback((): string => {
     const start = clamp(time - trim.start, 0, Math.max(0, trim.end - trim.start - 0.5));
     const cue: Cue = {
       id: uid('cue'),
@@ -256,6 +485,7 @@ export default function App() {
       words: [],
     };
     setSubtitles((s) => ({ ...s, enabled: true, cues: [...s.cues, cue].sort((a, b) => a.start - b.start) }));
+    return cue.id;
   }, [time, trim]);
 
   // ---------------------------------------------------------------- 모자이크(수동)
@@ -320,6 +550,52 @@ export default function App() {
     setOverlays((o) => ({ ...o, placeCard: { ...o.placeCard, ...patch } }));
   }, []);
 
+  // ---------------------------------------------------------------- 오디오 레이어 파일
+  const openAudioPicker = useCallback(() => {
+    if (audioLayers.length >= 3) {
+      showToast('오디오 레이어는 3개까지 올릴 수 있어요.');
+      return;
+    }
+    audioInputRef.current?.click();
+  }, [audioLayers.length, showToast]);
+
+  const addAudioFiles = useCallback(
+    async (files: FileList | null) => {
+      if (!files || !files.length) return;
+      if (audioLayers.length >= 3) {
+        showToast('오디오 레이어는 3개까지 올릴 수 있어요.');
+        return;
+      }
+      const room = 3 - audioLayers.length;
+      const clipLength = Math.max(0.2, trim.end - trim.start);
+      for (const file of Array.from(files).slice(0, room)) {
+        try {
+          const layer = await loadAudioFile(file);
+          const length = Math.round(Math.min(layer.duration, clipLength) * 100) / 100;
+          setAudioLayers((cur) => (cur.length >= 3 ? cur : [...cur, { ...layer, start: 0, offset: 0, length }]));
+          setTab('audio');
+          showToast(`${layer.name} 을(를) 오디오 레이어에 올렸어요.`);
+        } catch (err) {
+          showToast(err instanceof Error ? err.message : '오디오 파일을 열지 못했어요.');
+        }
+      }
+    },
+    [audioLayers.length, showToast, trim.start, trim.end],
+  );
+
+  const patchAudio = useCallback((id: string, patch: Partial<AudioLayer>) => {
+    setAudioLayers((cur) => cur.map((l) => (l.id === id ? { ...l, ...patch } : l)));
+  }, []);
+
+  const removeAudio = useCallback((id: string) => {
+    setAudioLayers((cur) => {
+      const target = cur.find((l) => l.id === id);
+      if (target) URL.revokeObjectURL(target.src);
+      return cur.filter((l) => l.id !== id);
+    });
+    setSelectedAudioId((cur) => (cur === id ? null : cur));
+  }, []);
+
   // ---------------------------------------------------------------- 내보내기(브라우저 단독)
   const handleCancelExport = useCallback(() => {
     cancelRef.current?.();
@@ -334,6 +610,10 @@ export default function App() {
       return;
     }
     if (render.busy) return;
+
+    // 미리보기 재생은 멈춘다(같은 소리가 이중으로 나지 않도록).
+    videoRef.current?.pause();
+    pauseAllAudio();
 
     releaseResult();
     setTab('export');
@@ -352,6 +632,8 @@ export default function App() {
         hasAudio: project.hasAudio,
         fps: project.fps || 30,
         fileBaseName: project.filename,
+        audioLayers,
+        videoVolume: videoMuted ? 0 : videoVolume,
         onProgress: (ratio, message) => setRender((r) => ({ ...r, busy: true, progress: ratio, message })),
         onCancelReady: (cancel) => {
           cancelRef.current = cancel;
@@ -373,7 +655,7 @@ export default function App() {
         error: err instanceof Error ? err.message : '영상을 만들지 못했습니다.',
       });
     }
-  }, [project, trim, aspect, subtitles, masks, hook, stickers, overlays, tracks, releaseResult, showToast, render.busy]);
+  }, [project, trim, aspect, subtitles, masks, hook, stickers, overlays, tracks, releaseResult, showToast, render.busy, audioLayers, videoVolume, videoMuted, pauseAllAudio]);
 
   // ---------------------------------------------------------------- 파생값
   const timelineCues = useMemo(() => subtitles.cues, [subtitles.cues]);
@@ -430,6 +712,9 @@ export default function App() {
               selectedStickerId={selectedStickerId}
               fontsTick={fontsTick}
               drawMode={drawMode}
+              playing={playing}
+              audioBlocked={audioBlocked}
+              onUnmute={unmutePlayback}
               onAddManual={addManualMask}
               onDrawModeChange={setDrawMode}
               onSelectSticker={setSelectedStickerId}
@@ -439,47 +724,91 @@ export default function App() {
 
           <div className="shrink-0 space-y-2 px-3 pb-3 sm:px-4">
             <div className="flex items-center gap-1.5 sm:gap-2">
-              <button type="button" className="btn-ghost !px-2.5 !py-1.5 sm:!px-3" onClick={() => seekTo(time - 1 / (project.fps || 30))} aria-label="이전 프레임">
+              <button
+                type="button"
+                className="btn-ghost min-h-[44px] !px-2.5 !py-1.5 sm:!px-3"
+                onClick={() => seekTo(time - 1 / (project.fps || 30))}
+                aria-label="이전 프레임"
+              >
                 ⏮
               </button>
-              <button type="button" className="btn-primary whitespace-nowrap !px-3 !py-1.5 text-xs sm:!px-4 sm:text-sm" onClick={togglePlay}>
+              <button
+                type="button"
+                className="btn-primary min-h-[44px] whitespace-nowrap !px-3 !py-1.5 text-xs sm:!px-4 sm:text-sm"
+                onClick={togglePlay}
+                aria-label={playing ? '일시정지' : '재생'}
+              >
                 {playing ? '⏸ 일시정지' : '▶︎ 재생'}
               </button>
-              <button type="button" className="btn-ghost !px-2.5 !py-1.5 sm:!px-3" onClick={() => seekTo(time + 1 / (project.fps || 30))} aria-label="다음 프레임">
+              <button
+                type="button"
+                className="btn-ghost min-h-[44px] !px-2.5 !py-1.5 sm:!px-3"
+                onClick={() => seekTo(time + 1 / (project.fps || 30))}
+                aria-label="다음 프레임"
+              >
                 ⏭
               </button>
-              <span className="whitespace-nowrap font-mono text-[10px] tabular-nums text-studio-400 sm:text-[11px]">
+              <span className="min-w-0 truncate whitespace-nowrap font-mono text-[10px] tabular-nums text-studio-400 sm:text-[11px]">
                 {formatTime(time)} / {formatTime(project.duration)}
               </span>
               <span className="ml-auto hidden text-[10px] text-studio-500 sm:block">Space 재생 · ←/→ 프레임</span>
             </div>
-            <Timeline
+
+            <TimelineTracks
               duration={project.duration}
               trim={trim}
               time={time}
+              cues={subtitles.cues}
+              stickers={stickers}
+              overlays={overlays}
+              audioLayers={audioLayers}
+              selectedCueId={selectedCueId}
+              selectedStickerId={selectedStickerId}
+              selectedAudioId={selectedAudioId}
               onChangeTrim={(t) => {
                 setTrim(t);
                 if (time < t.start || time > t.end) seekTo(t.start);
               }}
               onSeek={seekTo}
+              onSelectCue={(id) => {
+                setSelectedCueId(id);
+                setTab('subtitle');
+                const cue = subtitles.cues.find((c) => c.id === id);
+                if (cue) seekTo(trim.start + cue.start);
+              }}
+              onSelectSticker={(id) => {
+                setSelectedStickerId(id);
+                setTab('overlay');
+              }}
+              onSelectAudio={(id) => {
+                setSelectedAudioId(id);
+                setTab('audio');
+              }}
+              onAddCue={() => {
+                const id = addCue();
+                setSelectedCueId(id);
+                setTab('subtitle');
+              }}
+              onAddAudio={openAudioPicker}
             />
           </div>
         </section>
 
         <aside className="flex w-full flex-col border-t border-studio-700/70 bg-studio-900/60 lg:min-h-0 lg:w-[400px] lg:border-l lg:border-t-0">
-          <div className="grid shrink-0 grid-cols-5 gap-1 border-b border-studio-700/70 px-2 py-2">
+          <div className="grid shrink-0 grid-cols-3 gap-1 border-b border-studio-700/70 px-2 py-2 sm:grid-cols-6">
             {([
               ['title', '후킹 타이틀'],
               ['subtitle', `자막${subtitles.cues.length ? ` ${subtitles.cues.length}` : ''}`],
               ['overlay', `오버레이${stickers.length ? ` ${stickers.length}` : ''}`],
               ['mask', `모자이크${masks.manual.length ? ` ${masks.manual.length}` : ''}`],
+              ['audio', `오디오${audioLayers.length ? ` ${audioLayers.length}` : ''}`],
               ['export', '내보내기'],
             ] as [Tab, string][]).map(([key, label]) => (
               <button
                 key={key}
                 type="button"
                 onClick={() => setTab(key)}
-                className={`rounded-lg px-1 py-1.5 text-[11px] font-semibold leading-tight transition ${
+                className={`min-h-[36px] rounded-lg px-1 py-1.5 text-[11px] font-semibold leading-tight transition ${
                   tab === key ? 'bg-neon/15 text-white shadow-glow' : 'text-studio-400 hover:text-white'
                 }`}
               >
@@ -506,13 +835,36 @@ export default function App() {
                 subtitles={subtitles}
                 fonts={fonts}
                 currentTime={currentTimeline}
+                selectedCueId={selectedCueId}
                 onStyle={patchStyle}
                 onPreset={choosePreset}
                 onToggle={(v) => setSubtitles((s) => ({ ...s, enabled: v }))}
                 onCueChange={updateCue}
-                onCueDelete={deleteCue}
+                onCueDelete={(id) => {
+                  deleteCue(id);
+                  setSelectedCueId((cur) => (cur === id ? null : cur));
+                }}
                 onCueAdd={addCue}
+                onSelectCue={setSelectedCueId}
                 onSeek={(t) => seekTo(trim.start + t)}
+              />
+            ) : null}
+            {tab === 'audio' ? (
+              <AudioPanel
+                layers={audioLayers}
+                videoVolume={videoVolume}
+                videoMuted={videoMuted}
+                clipLength={Math.max(0, trim.end - trim.start)}
+                onAdd={openAudioPicker}
+                onPatch={patchAudio}
+                onRemove={removeAudio}
+                onVideoVolume={setVideoVolume}
+                onVideoMuted={setVideoMuted}
+                onSeek={(t) => {
+                  seekTo(trim.start + t);
+                  const layer = audioLayers.find((l) => Math.abs(l.start - t) < 0.001);
+                  if (layer) setSelectedAudioId(layer.id);
+                }}
               />
             ) : null}
             {tab === 'overlay' ? (
@@ -563,6 +915,8 @@ export default function App() {
                 masks={masks}
                 stickers={stickers}
                 overlays={overlays}
+                audioCount={audioLayers.length}
+                videoVolume={videoMuted ? 0 : videoVolume}
                 exporting={render.busy}
                 progress={render.progress}
                 message={render.message}
@@ -576,6 +930,19 @@ export default function App() {
           </div>
         </aside>
       </main>
+
+      {/* 오디오 레이어 파일 선택(화면에는 보이지 않음) */}
+      <input
+        ref={audioInputRef}
+        type="file"
+        accept="audio/*,.mp3,.m4a,.wav,.aac,.ogg"
+        multiple
+        className="hidden"
+        onChange={(e) => {
+          void addAudioFiles(e.target.files);
+          e.target.value = '';
+        }}
+      />
 
       {/* 내보내기 전용 원본 영상(화면에 보이지 않음). 미리보기 요소와 분리해 오디오 라우팅이 겹치지 않게 한다. */}
       <video

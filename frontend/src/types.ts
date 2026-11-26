@@ -254,6 +254,29 @@ export interface SubtitleState {
   style: SubtitleStyle;
 }
 
+/**
+ * 오디오 레이어(BGM·효과음). 영상과 별개로 타임라인 위에 얹혀
+ * 미리보기와 내보내기에서 원본 영상 소리와 함께 믹싱된다.
+ */
+export interface AudioLayer {
+  id: string;
+  name: string;
+  /** blob: URL — 기기 안에서만 쓰인다 */
+  src: string;
+  /** 오디오 파일 전체 길이(초) */
+  duration: number;
+  /** 편집본(트림 기준) 타임라인에서 재생을 시작하는 초 */
+  start: number;
+  /** 오디오 파일 안에서 재생을 시작할 지점(초) */
+  offset: number;
+  /** 타임라인에 놓이는 클립 길이(초) */
+  length: number;
+  /** 0~1 */
+  volume: number;
+  muted: boolean;
+  enabled: boolean;
+}
+
 export interface EditSpec {
   trim: { start: number; end: number };
   aspect: Aspect;

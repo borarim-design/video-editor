@@ -23,6 +23,9 @@ interface Props {
   selectedStickerId: string | null;
   fontsTick: number;
   drawMode: boolean;
+  playing: boolean;
+  audioBlocked: boolean;
+  onUnmute: () => void;
   onAddManual: (rect: { x: number; y: number; w: number; h: number }) => void;
   onDrawModeChange: (v: boolean) => void;
   onSelectSticker: (id: string | null) => void;
@@ -51,6 +54,9 @@ export default function PreviewStage({
   selectedStickerId,
   fontsTick,
   drawMode,
+  playing,
+  audioBlocked,
+  onUnmute,
   onAddManual,
   onDrawModeChange,
   onSelectSticker,
@@ -89,27 +95,65 @@ export default function PreviewStage({
     [trim, aspect, subtitles, hook, stickers, overlays, masks],
   );
 
-  const render = useCallback(() => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const drew = drawPreview({
-      canvas,
-      video: videoRef.current,
-      projectWidth: project.width,
-      projectHeight: project.height,
-      spec,
-      tracks,
-      t: tTimeline,
-      tSource: time,
-      dragBox: drag,
-      selectedStickerId,
-    });
-    setPainted((prev) => (prev === drew ? prev : drew));
-  }, [project, spec, tracks, tTimeline, time, drag, videoRef, selectedStickerId]);
+  const render = useCallback(
+    (overrideTime?: number) => {
+      const canvas = canvasRef.current;
+      if (!canvas) return;
+      // 재생 프레임 루프에서는 state 가 아닌 실제 영상 시간을 넘겨 그린다.
+      const tSource = overrideTime ?? time;
+      const tClip = Math.max(0, Math.min(tSource - trim.start, Math.max(0.001, trim.end - trim.start)));
+      const drew = drawPreview({
+        canvas,
+        video: videoRef.current,
+        projectWidth: project.width,
+        projectHeight: project.height,
+        spec,
+        tracks,
+        t: tClip,
+        tSource,
+        dragBox: drag,
+        selectedStickerId,
+      });
+      setPainted((prev) => (prev === drew ? prev : drew));
+    },
+    [project, spec, tracks, trim.start, trim.end, time, drag, videoRef, selectedStickerId],
+  );
+
+  const renderRef = useRef(render);
+  useEffect(() => {
+    renderRef.current = render;
+  }, [render]);
 
   useEffect(() => {
+    // 재생 중에는 아래 프레임 루프가 매 프레임 그리므로, 늦은 state 시간으로 다시 그려
+    // 화면이 튀지 않도록 건너뛴다.
+    const v = videoRef.current;
+    if (v && !v.paused && !v.ended) return;
     render();
-  }, [render, fontsTick, seekTick]);
+  }, [render, fontsTick, seekTick, videoRef]);
+
+  // 재생 중에는 requestAnimationFrame 으로 매 프레임 미리보기를 그린다.
+  // (timeupdate 는 1초에 몇 번만 오기 때문에 캔버스가 멈춘 것처럼 보였다 → iOS 재생 안 됨의 원인)
+  useEffect(() => {
+    let raf = 0;
+    let alive = true;
+    const loop = () => {
+      if (!alive) return;
+      const video = videoRef.current;
+      if (video && !video.paused && !video.ended) {
+        renderRef.current(video.currentTime);
+      }
+      raf = window.requestAnimationFrame(loop);
+    };
+    const video = videoRef.current;
+    if (playing || (video && !video.paused && !video.ended)) {
+      raf = window.requestAnimationFrame(loop);
+    }
+    return () => {
+      alive = false;
+      if (raf) window.cancelAnimationFrame(raf);
+    };
+  }, [playing, videoRef]);
 
   // iOS Safari 는 currentTime 0 프레임을 디코딩하지 않는 경우가 있어
   // 메타데이터가 오면 아주 살짝 seek 해서 첫 프레임을 강제로 만든다.
@@ -259,8 +303,12 @@ export default function PreviewStage({
       <div className="flex items-center justify-center p-2 sm:p-4 lg:min-h-0 lg:flex-1 lg:overflow-hidden">
         <div
           ref={wrapRef}
-          className="relative w-full lg:h-full lg:w-auto lg:max-w-full"
-          style={{ aspectRatio: `${geo.outW} / ${geo.outH}`, maxHeight: '100%' }}
+          className="preview-fit relative mx-auto max-w-full lg:w-auto"
+          style={{
+            aspectRatio: `${geo.outW} / ${geo.outH}`,
+            maxWidth: '100%',
+            ['--preview-ar' as string]: `${geo.outH / geo.outW}`,
+          }}
         >
           <div
             className="relative h-full w-full overflow-hidden rounded-xl border border-studio-700 bg-black shadow-[0_20px_60px_-20px_rgba(0,0,0,0.9)]"
@@ -271,7 +319,6 @@ export default function PreviewStage({
               ref={videoRef}
               src={project.srcUrl}
               playsInline
-              muted={false}
               preload="auto"
               className="pointer-events-none absolute inset-0 h-full w-full object-contain"
             />
@@ -321,6 +368,15 @@ export default function PreviewStage({
                   스티커를 끌어서 위치를 옮길 수 있어요
                 </span>
               </div>
+            ) : null}
+            {audioBlocked ? (
+              <button
+                type="button"
+                onClick={onUnmute}
+                className="absolute bottom-2 left-2 inline-flex min-h-[44px] items-center gap-1 rounded-full bg-neon-amber px-3 text-[11px] font-bold text-studio-900 shadow-lg"
+              >
+                🔇 음소거 재생 중 · 소리 켜기
+              </button>
             ) : null}
           </div>
         </div>
