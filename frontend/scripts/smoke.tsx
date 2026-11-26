@@ -10,9 +10,10 @@ const html = renderToString(<App />);
 const checks = [
   '릴컷 스튜디오',
   '영상 파일을 끌어다 놓거나',
-  '자동 AI 자막',
-  '얼굴 추적 모자이크',
+  '단어 하이라이트 자막',
+  '수동 모자이크',
   '릴스·숏츠 비율',
+  '서버 없는 정적 버전',
 ];
 
 const missing = checks.filter((c) => !html.includes(c));
@@ -22,6 +23,10 @@ if (missing.length) {
 }
 if (html.length < 2000) {
   console.error('SSR smoke 실패 — 출력이 너무 짧습니다:', html.length);
+  process.exit(1);
+}
+if (html.includes('/api/')) {
+  console.error('SSR smoke 실패 — 서버 API 호출 흔적이 있습니다');
   process.exit(1);
 }
 console.log(`SSR smoke OK (${html.length} bytes)`);

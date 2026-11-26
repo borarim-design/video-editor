@@ -2,16 +2,12 @@ import type { Cue, FontFamily, Preset, SubtitleState, SubtitleStyle } from '../t
 import { PRESETS } from '../lib/presets';
 import { fontFamilyName } from '../lib/fonts';
 import { formatTime, parseTimecode, timecodeInput } from '../lib/format';
-import { Badge, ProgressBar, Section, Segmented, Slider, Toggle } from './ui';
+import { Badge, Section, Segmented, Slider, Toggle } from './ui';
 
 interface Props {
   subtitles: SubtitleState;
   fonts: FontFamily[];
-  hasAudio: boolean;
   currentTime: number;
-  autoBusy: boolean;
-  autoProgress: number;
-  autoMessage: string;
   onStyle: (patch: Partial<SubtitleStyle>) => void;
   onPreset: (preset: Preset) => void;
   onToggle: (v: boolean) => void;
@@ -19,17 +15,12 @@ interface Props {
   onCueDelete: (id: string) => void;
   onCueAdd: () => void;
   onSeek: (t: number) => void;
-  onAuto: () => void;
 }
 
 export default function SubtitlePanel({
   subtitles,
   fonts,
-  hasAudio,
   currentTime,
-  autoBusy,
-  autoProgress,
-  autoMessage,
   onStyle,
   onPreset,
   onToggle,
@@ -37,7 +28,6 @@ export default function SubtitlePanel({
   onCueDelete,
   onCueAdd,
   onSeek,
-  onAuto,
 }: Props) {
   const { style, cues, enabled } = subtitles;
   const family = fonts.find((f) => f.id === style.font) || fonts[0];
@@ -49,18 +39,20 @@ export default function SubtitlePanel({
     <div className="scroll-thin h-full overflow-y-auto">
       <Section
         title="AI 자동 자막"
-        right={<Badge tone={hasAudio ? 'live' : 'warn'}>{hasAudio ? 'faster-whisper' : '오디오 없음'}</Badge>}
-        description="음성을 인식해 단어 단위 타이밍으로 자막을 만든 뒤, 숏폼에 맞게 짧은 줄로 끊어 줍니다."
+        right={<Badge tone="warn">정적 모드</Badge>}
+        description="서버 없이 동작하는 GitHub Pages 모드입니다. 수동 자막은 아래에서 바로 추가·편집할 수 있어요."
       >
         <button
           type="button"
-          className="btn-primary w-full"
-          disabled={autoBusy || !hasAudio}
-          onClick={onAuto}
+          className="btn-ghost w-full cursor-not-allowed opacity-45"
+          disabled
+          title="GitHub Pages 모드에서는 수동 자막·수동 모자이크를 지원하며, AI 자동 기능은 추후 서버 연결 시 활성화됩니다"
         >
-          {autoBusy ? '자막 만드는 중…' : '✨ 자동 자막 생성'}
+          ✨ 자동 자막 생성 (서버 연결 시)
         </button>
-        {autoBusy ? <ProgressBar value={autoProgress} label={autoMessage || '음성 인식 중'} /> : null}
+        <p className="text-[11px] leading-relaxed text-studio-400">
+          GitHub Pages 모드에서는 수동 자막·수동 모자이크를 지원하며, AI 자동 기능은 추후 서버 연결 시 활성화됩니다.
+        </p>
         <Toggle label="자막 표시" checked={enabled} onChange={onToggle} hint="끄면 미리보기·내보내기에서 모두 사라집니다." />
       </Section>
 
@@ -87,7 +79,7 @@ export default function SubtitlePanel({
         </div>
       </Section>
 
-      <Section title="폰트" right={<span className="text-[10px] text-studio-400">{fonts.length}종 · 백엔드 서빙</span>}>
+      <Section title="폰트" right={<span className="text-[10px] text-studio-400">{fonts.length}종 · 내장</span>}>
         <div className="grid grid-cols-2 gap-1.5">
           {fonts.map((f) => (
             <button

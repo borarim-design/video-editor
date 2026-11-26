@@ -51,6 +51,8 @@ export interface ProjectMeta {
   hasAudio: boolean;
   frames: number;
   sizeBytes?: number;
+  /** 브라우저에서 만든 객체 URL(blob:) — 서버 없이 로컬 파일을 재생한다. */
+  srcUrl: string;
 }
 
 export interface TrackKeyframe {
@@ -196,6 +198,21 @@ export interface RenderResult {
   downloadUrl: string;
   playUrl: string;
   fileName: string;
+}
+
+/** 브라우저(MediaRecorder)에서 바로 만든 결과물 */
+export interface ExportResult {
+  width: number;
+  height: number;
+  duration: number;
+  elapsedSec: number;
+  hasAudio: boolean;
+  sizeBytes: number;
+  /** blob: 객체 URL — 재생·다운로드 공용 */
+  url: string;
+  fileName: string;
+  mimeType: string;
+  extension: 'mp4' | 'webm';
 }
 
 export interface TranscribeResult {

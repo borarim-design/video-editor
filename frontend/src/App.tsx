@@ -1,13 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type {
-  Aspect, Cue, EditSpec, FontFamily, HookPreset, HookTitle, ManualMask, MaskState,
-  PersonTrack, Preset, ProjectMeta, RenderResult, SubtitleState, SubtitleStyle,
+  Aspect, Cue, EditSpec, ExportResult, FontFamily, HookPreset, HookTitle, ManualMask, MaskState,
+  PersonTrack, Preset, ProjectMeta, SubtitleState, SubtitleStyle,
 } from './types';
 import { DEFAULT_HOOK, DEFAULT_MASKS, DEFAULT_STYLE, ASPECTS, HOOK_PRESETS, applyHookPreset, applyPreset, buildSpec } from './lib/presets';
 import { ensureFontsLoaded, waitForFont, fontFamilyForStyle } from './lib/fonts';
-import {
-  downloadUrl, pollJob, resultVideoUrl, startDetectFaces, startRender, startTranscribe, uploadProject,
-} from './lib/api';
+import { loadLocalVideo } from './lib/local-media';
+import { ExportCanceledError, exportVideo } from './lib/exporter';
 import { clamp, formatTime, uid } from './lib/format';
 import TopBar from './components/TopBar';
 import UploadZone from './components/UploadZone';
@@ -20,16 +19,22 @@ import HookPanel from './components/HookPanel';
 
 type Tab = 'title' | 'subtitle' | 'mask' | 'export';
 
-interface AsyncState {
+interface ExportState {
   busy: boolean;
   progress: number;
   message: string;
+  result: ExportResult | null;
+  error: string | null;
 }
 
-const IDLE: AsyncState = { busy: false, progress: 0, message: '' };
+const IDLE_EXPORT: ExportState = { busy: false, progress: 0, message: '', result: null, error: null };
 
 export default function App() {
   const videoRef = useRef<HTMLVideoElement | null>(null);
+  const exportVideoRef = useRef<HTMLVideoElement | null>(null);
+  const projectUrlRef = useRef<string | null>(null);
+  const resultUrlRef = useRef<string | null>(null);
+  const cancelRef = useRef<(() => void) | null>(null);
 
   const [project, setProject] = useState<ProjectMeta | null>(null);
   const [time, setTime] = useState(0);
@@ -46,15 +51,8 @@ export default function App() {
   const [drawMode, setDrawMode] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
 
-  const [upload, setUpload] = useState<{ busy: boolean; progress: number; error: string | null }>({
-    busy: false, progress: 0, error: null,
-  });
-  const [asr, setAsr] = useState<AsyncState>(IDLE);
-  const [detect, setDetect] = useState<AsyncState>(IDLE);
-  const [render, setRender] = useState<{
-    busy: boolean; progress: number; message: string; result: RenderResult | null;
-    jobId: string | null; error: string | null;
-  }>({ busy: false, progress: 0, message: '', result: null, jobId: null, error: null });
+  const [upload, setUpload] = useState<{ busy: boolean; error: string | null }>({ busy: false, error: null });
+  const [render, setRender] = useState<ExportState>(IDLE_EXPORT);
 
   useEffect(() => {
     ensureFontsLoaded()
@@ -62,7 +60,7 @@ export default function App() {
         setFonts(list);
         setFontsTick((v) => v + 1);
       })
-      .catch(() => setToast('폰트 목록을 불러오지 못했습니다. 서버 연결을 확인해 주세요.'));
+      .catch(() => setToast('내장 폰트를 불러오지 못했습니다. 페이지를 새로 고침해 주세요.'));
   }, []);
 
   useEffect(() => {
@@ -73,39 +71,56 @@ export default function App() {
 
   const showToast = useCallback((msg: string) => {
     setToast(msg);
-    window.setTimeout(() => setToast((cur) => (cur === msg ? null : cur)), 3200);
+    window.setTimeout(() => setToast((cur) => (cur === msg ? null : cur)), 3600);
   }, []);
 
-  // ---------------------------------------------------------------- 업로드
+  const releaseResult = useCallback(() => {
+    if (resultUrlRef.current) {
+      URL.revokeObjectURL(resultUrlRef.current);
+      resultUrlRef.current = null;
+    }
+  }, []);
+
+  const replaceProject = useCallback((meta: ProjectMeta | null) => {
+    if (projectUrlRef.current && projectUrlRef.current !== meta?.srcUrl) {
+      URL.revokeObjectURL(projectUrlRef.current);
+    }
+    projectUrlRef.current = meta?.srcUrl ?? null;
+    setProject(meta);
+  }, []);
+
+  // ---------------------------------------------------------------- 파일 열기(서버 없이)
   const handleFile = useCallback(async (file: File) => {
-    setUpload({ busy: true, progress: 0, error: null });
+    setUpload({ busy: true, error: null });
     try {
-      const meta = await uploadProject(file, (p) => setUpload({ busy: true, progress: p, error: null }));
-      setProject(meta);
+      const meta = await loadLocalVideo(file);
+      releaseResult();
+      replaceProject(meta);
       setTrim({ start: 0, end: meta.duration });
       setTime(0);
       setTracks([]);
       setMasks({ ...DEFAULT_MASKS, tracks: [] });
       setSubtitles({ enabled: true, cues: [], style: DEFAULT_STYLE });
       setHook(DEFAULT_HOOK);
-      setRender({ busy: false, progress: 0, message: '', result: null, jobId: null, error: null });
+      setRender(IDLE_EXPORT);
       setTab('subtitle');
-      setUpload({ busy: false, progress: 1, error: null });
+      setUpload({ busy: false, error: null });
     } catch (err) {
-      setUpload({ busy: false, progress: 0, error: err instanceof Error ? err.message : '업로드 실패' });
+      setUpload({ busy: false, error: err instanceof Error ? err.message : '영상을 열지 못했습니다.' });
     }
-  }, []);
+  }, [releaseResult, replaceProject]);
 
   const resetProject = useCallback(() => {
     setPlaying(false);
-    setProject(null);
+    releaseResult();
+    replaceProject(null);
     setTracks([]);
     setSubtitles({ enabled: true, cues: [], style: DEFAULT_STYLE });
     setHook(DEFAULT_HOOK);
     setMasks(DEFAULT_MASKS);
-    setUpload({ busy: false, progress: 0, error: null });
-    setRender({ busy: false, progress: 0, message: '', result: null, jobId: null, error: null });
-  }, []);
+    setUpload({ busy: false, error: null });
+    setRender(IDLE_EXPORT);
+  }, [releaseResult, replaceProject]);
 
   // ---------------------------------------------------------------- 재생
   const seekTo = useCallback((t: number) => {
@@ -189,26 +204,6 @@ export default function App() {
     });
   }, []);
 
-  const handleAutoSubtitles = useCallback(async () => {
-    if (!project) return;
-    setAsr({ busy: true, progress: 0, message: '음성 추출 중…' });
-    try {
-      const jobId = await startTranscribe(project.id, { language: 'ko', start: trim.start, end: trim.end });
-      const job = await pollJob<{ cues: Cue[] }>(jobId, (j) =>
-        setAsr({ busy: true, progress: j.progress, message: j.message }),
-      );
-      if (job.status !== 'done' || !job.result) throw new Error(job.error || '자막 생성 실패');
-      const cues = job.result.cues;
-      setSubtitles((s) => ({ ...s, enabled: true, cues }));
-      setAsr(IDLE);
-      showToast(cues.length ? `자막 ${cues.length}개를 만들었습니다.` : '인식된 음성이 없습니다.');
-      setTab('subtitle');
-    } catch (err) {
-      setAsr(IDLE);
-      showToast(err instanceof Error ? err.message : '자막 생성 실패');
-    }
-  }, [project, trim.start, trim.end, showToast]);
-
   const updateCue = useCallback((id: string, patch: Partial<Cue>) => {
     setSubtitles((s) => ({
       ...s,
@@ -232,38 +227,7 @@ export default function App() {
     setSubtitles((s) => ({ ...s, enabled: true, cues: [...s.cues, cue].sort((a, b) => a.start - b.start) }));
   }, [time, trim]);
 
-  // ---------------------------------------------------------------- 모자이크
-  const handleDetect = useCallback(async () => {
-    if (!project) return;
-    setDetect({ busy: true, progress: 0, message: '프레임 분석 중…' });
-    try {
-      const jobId = await startDetectFaces(project.id, 6);
-      const job = await pollJob<{ tracks: PersonTrack[] }>(jobId, (j) =>
-        setDetect({ busy: true, progress: j.progress, message: j.message }),
-      );
-      if (job.status !== 'done' || !job.result) throw new Error(job.error || '얼굴 분석 실패');
-      const found = job.result.tracks;
-      setTracks(found);
-      setMasks((m) => ({ ...m, enabled: true, tracks: found.map((t) => ({ id: t.id, enabled: true })) }));
-      setDetect(IDLE);
-      showToast(found.length ? `인물 ${found.length}명을 찾았습니다.` : '얼굴을 찾지 못했습니다. 직접 영역을 지정해 보세요.');
-      setTab('mask');
-    } catch (err) {
-      setDetect(IDLE);
-      showToast(err instanceof Error ? err.message : '얼굴 분석 실패');
-    }
-  }, [project, showToast]);
-
-  const toggleTrack = useCallback((id: number, enabled: boolean) => {
-    setMasks((m) => {
-      const exists = m.tracks.some((t) => t.id === id);
-      return {
-        ...m,
-        tracks: exists ? m.tracks.map((t) => (t.id === id ? { ...t, enabled } : t)) : [...m.tracks, { id, enabled }],
-      };
-    });
-  }, []);
-
+  // ---------------------------------------------------------------- 모자이크(수동)
   const addManualMask = useCallback((rect: { x: number; y: number; w: number; h: number }) => {
     if (!project) return;
     const mask: ManualMask = {
@@ -276,32 +240,59 @@ export default function App() {
     showToast('영역을 추가했습니다. 구간을 조정해 보세요.');
   }, [project, showToast]);
 
-  // ---------------------------------------------------------------- 내보내기
+  // ---------------------------------------------------------------- 내보내기(브라우저 단독)
+  const handleCancelExport = useCallback(() => {
+    cancelRef.current?.();
+    cancelRef.current = null;
+  }, []);
+
   const handleRender = useCallback(async () => {
     if (!project) return;
-    setRender({ busy: true, progress: 0, message: '준비 중…', result: null, jobId: null, error: null });
+    const video = exportVideoRef.current;
+    if (!video) {
+      showToast('영상을 준비하지 못했습니다. 페이지를 새로 고침해 주세요.');
+      return;
+    }
+    if (render.busy) return;
+
+    releaseResult();
     setTab('export');
+    setRender({ busy: true, progress: 0, message: '준비 중…', result: null, error: null });
+
     try {
       const spec: EditSpec = buildSpec(trim, aspect, subtitles, masks, hook);
-      const jobId = await startRender(project.id, spec);
-      const job = await pollJob<RenderResult>(jobId, (j) =>
-        setRender((r) => ({ ...r, busy: true, progress: j.progress, message: j.message })),
-      );
-      if (job.status !== 'done' || !job.result) throw new Error(job.error || '렌더링 실패');
-      const result = {
-        ...job.result,
-        downloadUrl: job.result.downloadUrl || downloadUrl(jobId),
-        playUrl: job.result.playUrl || resultVideoUrl(jobId),
-      };
-      setRender({ busy: false, progress: 1, message: '완료', result, jobId, error: null });
-      showToast('MP4가 완성되었습니다.');
+      const result = await exportVideo({
+        video,
+        projectWidth: project.width,
+        projectHeight: project.height,
+        spec,
+        tracks,
+        trim,
+        hasAudio: project.hasAudio,
+        fps: project.fps || 30,
+        fileBaseName: project.filename,
+        onProgress: (ratio, message) => setRender((r) => ({ ...r, busy: true, progress: ratio, message })),
+        onCancelReady: (cancel) => {
+          cancelRef.current = cancel;
+        },
+      });
+      cancelRef.current = null;
+      resultUrlRef.current = result.url;
+      setRender({ busy: false, progress: 1, message: '완료', result, error: null });
+      showToast(result.extension === 'mp4' ? 'MP4가 완성되었습니다. 아래에서 내려받으세요.' : 'WebM이 완성되었습니다. 아래에서 내려받으세요.');
     } catch (err) {
+      cancelRef.current = null;
+      if (err instanceof ExportCanceledError) {
+        setRender(IDLE_EXPORT);
+        showToast('내보내기를 취소했습니다.');
+        return;
+      }
       setRender({
-        busy: false, progress: 0, message: '', result: null, jobId: null,
-        error: err instanceof Error ? err.message : '렌더링 실패',
+        busy: false, progress: 0, message: '', result: null,
+        error: err instanceof Error ? err.message : '영상을 만들지 못했습니다.',
       });
     }
-  }, [project, trim, aspect, subtitles, masks, hook, showToast]);
+  }, [project, trim, aspect, subtitles, masks, hook, tracks, releaseResult, showToast, render.busy]);
 
   // ---------------------------------------------------------------- 파생값
   const timelineCues = useMemo(() => subtitles.cues, [subtitles.cues]);
@@ -311,7 +302,7 @@ export default function App() {
     return (
       <div className="grid-bg min-h-full">
         <TopBar project={null} exporting={false} onReset={resetProject} onExport={() => undefined} />
-        <UploadZone onFile={handleFile} busy={upload.busy} progress={upload.progress} error={upload.error} />
+        <UploadZone onFile={handleFile} busy={upload.busy} error={upload.error} />
       </div>
     );
   }
@@ -394,7 +385,7 @@ export default function App() {
             {([
               ['title', '후킹 타이틀'],
               ['subtitle', `자막${subtitles.cues.length ? ` ${subtitles.cues.length}` : ''}`],
-              ['mask', `모자이크${tracks.length ? ` ${tracks.length}` : ''}`],
+              ['mask', `모자이크${masks.manual.length ? ` ${masks.manual.length}` : ''}`],
               ['export', '내보내기'],
             ] as [Tab, string][]).map(([key, label]) => (
               <button
@@ -426,11 +417,7 @@ export default function App() {
               <SubtitlePanel
                 subtitles={subtitles}
                 fonts={fonts}
-                hasAudio={project.hasAudio}
                 currentTime={currentTimeline}
-                autoBusy={asr.busy}
-                autoProgress={asr.progress}
-                autoMessage={asr.message}
                 onStyle={patchStyle}
                 onPreset={choosePreset}
                 onToggle={(v) => setSubtitles((s) => ({ ...s, enabled: v }))}
@@ -438,25 +425,18 @@ export default function App() {
                 onCueDelete={deleteCue}
                 onCueAdd={addCue}
                 onSeek={(t) => seekTo(trim.start + t)}
-                onAuto={handleAutoSubtitles}
               />
             ) : null}
             {tab === 'mask' ? (
               <MaskPanel
                 masks={masks}
-                tracks={tracks}
                 duration={project.duration}
-                busy={detect.busy}
-                progress={detect.progress}
-                message={detect.message}
                 drawMode={drawMode}
                 onToggleEnabled={(v) => setMasks((m) => ({ ...m, enabled: v }))}
                 onMode={(mode) => setMasks((m) => ({ ...m, mode }))}
                 onShape={(shape) => setMasks((m) => ({ ...m, shape }))}
                 onStrength={(strength) => setMasks((m) => ({ ...m, strength }))}
                 onPad={(pad) => setMasks((m) => ({ ...m, pad }))}
-                onToggleTrack={toggleTrack}
-                onDetect={handleDetect}
                 onStartDraw={() => {
                   setDrawMode((v) => !v);
                   if (!drawMode) showToast('미리보기에서 가릴 영역을 드래그하세요.');
@@ -480,15 +460,27 @@ export default function App() {
                 progress={render.progress}
                 message={render.message}
                 result={render.result}
-                jobId={render.jobId}
                 error={render.error}
                 onAspect={setAspect}
                 onExport={handleRender}
+                onCancel={handleCancelExport}
               />
             ) : null}
           </div>
         </aside>
       </main>
+
+      {/* 내보내기 전용 원본 영상(화면에 보이지 않음). 미리보기 요소와 분리해 오디오 라우팅이 겹치지 않게 한다. */}
+      <video
+        ref={exportVideoRef}
+        src={project.srcUrl}
+        preload="auto"
+        playsInline
+        aria-hidden="true"
+        tabIndex={-1}
+        className="pointer-events-none"
+        style={{ position: 'fixed', left: -9999, top: 0, width: 2, height: 2, opacity: 0.01 }}
+      />
 
       {toast ? (
         <div className="pointer-events-none fixed bottom-5 left-1/2 z-50 -translate-x-1/2 rounded-full border border-studio-600 bg-studio-800/95 px-4 py-2 text-xs font-medium text-studio-100 shadow-xl backdrop-blur">

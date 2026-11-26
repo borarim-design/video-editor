@@ -17,9 +17,16 @@ export default function TopBar({ project, exporting, onReset, onExport }: Props)
         </div>
         <div className="leading-tight">
           <p className="text-sm font-extrabold tracking-tight text-white">릴컷 스튜디오</p>
-          <p className="hidden text-[10px] text-studio-400 sm:block">자동 자막 · 추적 모자이크</p>
+          <p className="hidden text-[10px] text-studio-400 sm:block">수동 자막 · 모자이크 · 릴스 비율</p>
         </div>
       </div>
+
+      <span
+        className="hidden items-center gap-1 rounded-full border border-studio-600 bg-studio-800/70 px-2 py-0.5 text-[10px] font-semibold text-studio-300 sm:inline-flex"
+        title="GitHub Pages 모드: 서버 없이 이 브라우저에서만 동작합니다. AI 자동 자막·자동 얼굴 추적은 추후 서버 연결 시 활성화됩니다."
+      >
+        정적 모드 · 서버 없음
+      </span>
 
       {project ? (
         <div className="ml-2 flex min-w-0 items-center gap-2">

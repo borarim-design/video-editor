@@ -9,6 +9,7 @@
     "build": "tsc -b && vite build",
     "typecheck": "tsc -b",
     "preview": "vite preview",
+    "check:static": "node scripts/check-static.mjs",
     "parity": "tsc -p tsconfig.parity.json && node -e \"require('fs').writeFileSync('.parity/package.json', JSON.stringify({type:'commonjs'}))\" && node .parity/scripts/parity.js",
     "smoke": "vite build --ssr scripts/smoke.tsx --outDir .smoke --emptyOutDir && node .smoke/smoke.js"
   },

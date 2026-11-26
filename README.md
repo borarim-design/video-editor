@@ -1,11 +1,18 @@
 # 🎬 릴컷 스튜디오 (reelcut studio)
 
-숏폼(릴스·숏츠·틱톡)을 위한 **자동 AI 자막 + 추적 모자이크** 영상 편집기.
-브라우저에서 바로 편집하고, 서버가 **미리보기와 똑같은** MP4를 렌더링합니다.
+숏폼(릴스·숏츠·틱톡)을 위한 영상 편집기. 트림·비율 크롭·자막·모자이크·상단 후킹 타이틀을 브라우저에서 바로 얹고 MP4로 내려받습니다.
+
+**두 가지 모드로 동작합니다.**
+
+| 모드 | 실행 위치 | 자동 AI 자막 | 자동 얼굴 추적 | 내보내기 |
+| --- | --- | --- | --- | --- |
+| 📄 **정적 모드** | GitHub Pages (`https://borarim-design.github.io/video-editor/`) | ✗ (수동 자막) | ✗ (수동 영역 지정) | 브라우저 안에서 (Canvas + MediaRecorder) |
+| ☁️ **서버 모드** | Docker / Cloud Run | ✓ faster-whisper | ✓ Haar 추적 | 서버 렌더링 MP4 (FFmpeg) |
+
+`backend/` 는 서버 모드용으로 그대로 남겨 두었습니다. 정적 모드에서는 영상 파일이 **브라우저를 벗어나지 않습니다**.
 
 - 프론트엔드: React 19 + TypeScript + Vite + Tailwind CSS (다크 스튜디오 테마, PC/모바일 반응형)
-- 백엔드: FastAPI + FFmpeg + OpenCV + Pillow + faster-whisper
-- 통합 `Dockerfile` 하나로 빌드 → FastAPI가 정적 파일과 API를 같은 오리진에서 서빙 (`PORT` 지원, Cloud Run 바로 배포 가능)
+- 백엔드(선택): FastAPI + FFmpeg + OpenCV + Pillow + faster-whisper
 
 ![단어 강조 자막](docs/samples/highlight.png)
 
@@ -66,9 +73,15 @@
 ![리뷰밍밍 스타일 후킹 타이틀](docs/samples/hook-reviewming.png)
 
 ### 5. 내보내기
-- 작업(job) 기반 비동기 렌더링 + 진행률 표시
-- 완성된 MP4 **다운로드** 및 결과 미리보기(스트리밍)
-- H.264 / AAC, `+faststart`
+
+**정적 모드(GitHub Pages)** — 서버 없이 브라우저에서 끝냅니다.
+- 오프스크린 Canvas + `captureStream()` + Web Audio API(원본 오디오) + `MediaRecorder`
+- 미리보기와 **같은 `drawPreview()`** 로 프레임을 합성하므로 화면과 결과물이 같습니다
+- 진행률(%)·취소·다운로드 버튼, 결과 미리보기
+- 컨테이너: 브라우저가 지원하면 **MP4**(`video/mp4`, H.264/AAC), 아니면 **WebM**(VP9/Opus)
+- 실제 재생 속도로 녹화합니다(영상 길이만큼 시간이 걸림)
+
+**서버 모드** — 작업(job) 기반 비동기 렌더링 + 진행률 표시, H.264/AAC `+faststart` MP4.
 
 ---
 
@@ -76,9 +89,10 @@
 
 ```
 video-editor/
+├─ .github/workflows/deploy.yml  # main push → GitHub Pages 자동 배포
 ├─ Dockerfile                 # 멀티스테이지: 프론트 빌드 → FastAPI 정적 서빙
 ├─ .dockerignore / .gitignore
-├─ backend/
+├─ backend/                   # (선택) 서버 모드 — 정적 모드에서는 사용하지 않음
 │  ├─ app/
 │  │  ├─ main.py              # FastAPI 라우트·정적 서빙
 │  │  ├─ config.py            # 환경변수·경로·ffmpeg 해석
@@ -97,14 +111,19 @@ video-editor/
 │  ├─ tests/                  # E2E 테스트(실제 API·실제 MP4 검증)
 │  └─ requirements.txt
 └─ frontend/
+   ├─ public/fonts/           # 정적 모드용 폰트 (backend/fonts 복사본, 14종 21파일)
+   ├─ public/favicon.svg
    ├─ src/
    │  ├─ App.tsx              # 편집 상태 오케스트레이션
    │  ├─ lib/layout.ts        # backend/app/layout.py 와 동일한 좌표 계산
    │  ├─ lib/preview.ts       # Canvas 미리보기 렌더러
-   │  ├─ lib/fonts.ts         # /api/fonts 의 TTF 를 @font-face 로 등록
+   │  ├─ lib/exporter.ts      # 브라우저 단독 내보내기 (Canvas + MediaRecorder)
+   │  ├─ lib/local-media.ts   # 로컬 파일 → objectURL, 해상도·길이·fps 읽기
+   │  ├─ lib/font-catalog.ts  # 번들 폰트 카탈로그 (정적 /fonts/ 경로)
+   │  ├─ lib/fonts.ts         # TTF 를 @font-face 로 등록
    │  ├─ lib/api.ts, presets.ts, format.ts
    │  └─ components/          # PreviewStage, Timeline, SubtitlePanel, MaskPanel, ExportPanel …
-   └─ scripts/parity.ts       # 프론트↔백엔드 레이아웃 일치 검증 하네스
+   └─ scripts/                # parity.ts · smoke.tsx · check-static.mjs
 ```
 
 ---
@@ -112,7 +131,7 @@ video-editor/
 ## 🔤 한글 폰트 (14종 / 21파일)
 
 요즘 릴스·숏츠·브이로그에서 많이 쓰는 무료 폰트를 **실제 TTF로 저장소에 포함**했습니다.
-프론트엔드는 `/api/fonts`로, 백엔드는 `backend/fonts`의 **같은 파일**을 쓰기 때문에 미리보기와 결과물의 글꼴이 100% 일치합니다.
+같은 파일을 `frontend/public/fonts/`(정적 모드, `/fonts/*.ttf`)와 `backend/fonts/`(서버 모드, `/api/fonts`)가 함께 쓰기 때문에 미리보기와 결과물의 글꼴이 100% 일치합니다.
 
 | 폰트 | 분류 | 파일 |
 | --- | --- | --- |
@@ -139,7 +158,20 @@ video-editor/
 
 ## 🚀 실행
 
-### 1) Docker (권장)
+### 0) GitHub Pages — 정적 모드 (서버 불필요)
+```bash
+cd frontend
+npm ci
+npm run build          # base=/video-editor/ 로 dist 생성
+npm run check:static   # base 경로·폰트 21개·/api 호출 없음 검사
+npm run smoke          # SSR 렌더 스모크
+npx vite preview       # http://localhost:4173/video-editor/
+```
+- `main` 브랜치에 푸시하면 [`.github/workflows/deploy.yml`](.github/workflows/deploy.yml) 이 `npm ci && npm run build` 후 Pages 로 배포합니다.
+- 최초 1회만 저장소 **Settings → Pages → Build and deployment → Source: GitHub Actions** 로 지정하면 됩니다.
+- 주소: https://borarim-design.github.io/video-editor/ · 다른 경로에 올릴 때는 `VITE_BASE_PATH` 로 base 를 바꿉니다.
+
+### 1) Docker (서버 모드 — AI 자막·자동 추적까지)
 ```bash
 docker build -t reelcut .
 docker run --rm -p 8080:8080 reelcut
@@ -174,7 +206,8 @@ npm run dev        # http://localhost:5173 → /api 는 8080 으로 프록시
 ### 환경변수
 | 이름 | 기본값 | 설명 |
 | --- | --- | --- |
-| `PORT` | 8080 | 서버 포트 |
+| `VITE_BASE_PATH` | `/video-editor/` | 프론트 빌드 base 경로(GitHub Pages) |
+| `PORT` | 8080 | 서버 모드 포트 |
 | `WORK_DIR` | 시스템 임시폴더 | 업로드·출력 작업 폴더 |
 | `FONT_DIR` | `backend/fonts` | 폰트 폴더 |
 | `STATIC_DIR` | `frontend/dist` 또는 `/app/static` | 정적 파일 |

@@ -1,7 +1,8 @@
-import type { EditSpec, HookTitle, MaskState, ProjectMeta, RenderResult, SubtitleState } from '../types';
+import type { EditSpec, ExportResult, HookTitle, MaskState, ProjectMeta, SubtitleState } from '../types';
 import { outputGeometry } from '../lib/layout';
 import { formatBytes, formatTime } from '../lib/format';
 import { ASPECTS } from '../lib/presets';
+import { exportFormatLabel } from '../lib/exporter';
 import { Badge, ProgressBar, Section } from './ui';
 
 interface Props {
@@ -14,11 +15,11 @@ interface Props {
   exporting: boolean;
   progress: number;
   message: string;
-  result: RenderResult | null;
-  jobId: string | null;
+  result: ExportResult | null;
   error: string | null;
   onAspect: (a: EditSpec['aspect']) => void;
   onExport: () => void;
+  onCancel: () => void;
 }
 
 export default function ExportPanel({
@@ -32,15 +33,15 @@ export default function ExportPanel({
   progress,
   message,
   result,
-  jobId,
   error,
   onAspect,
   onExport,
+  onCancel,
 }: Props) {
   const geo = outputGeometry(project.width, project.height, aspect);
   const duration = Math.max(0, trim.end - trim.start);
-  const activeTracks = masks.tracks.filter((t) => t.enabled).length;
   const manualCount = masks.manual.length;
+  const format = exportFormatLabel();
 
   return (
     <div className="scroll-thin h-full overflow-y-auto">
@@ -74,7 +75,7 @@ export default function ExportPanel({
             ['후킹 타이틀', hook.enabled
               ? `${hook.preset} · ${hook.title.split('\n').filter(Boolean).length}줄${hook.speedLines.enabled ? ' · 집중선' : ''}`
               : '없음'],
-            ['모자이크', masks.enabled ? `인물 ${activeTracks}명 · 직접 ${manualCount}곳 · ${masks.mode === 'blur' ? '블러' : '모자이크'} ${masks.strength}%` : '없음'],
+            ['모자이크', masks.enabled ? `직접 ${manualCount}곳 · ${masks.mode === 'blur' ? '블러' : '모자이크'} ${masks.strength}% · ${masks.shape === 'rect' ? '사각형' : masks.shape === 'ellipse' ? '타원' : '원형'}` : '없음'],
             ['원본', `${project.width}×${project.height} · ${project.fps.toFixed(2)}fps`],
           ].map(([k, v]) => (
             <div key={k} className="flex items-baseline justify-between gap-3 border-b border-studio-800/70 pb-1.5 last:border-0">
@@ -85,19 +86,26 @@ export default function ExportPanel({
         </dl>
       </Section>
 
-      <Section title="MP4 만들기" right={<Badge>H.264 · AAC</Badge>}>
+      <Section title="영상 만들기" right={<Badge>{format === 'MP4' ? 'MP4 · H.264/AAC' : 'WebM · VP9/Opus'}</Badge>}>
         <button type="button" className="btn-primary w-full" disabled={exporting} onClick={onExport}>
-          {exporting ? '내보내는 중…' : result ? '🎬 다시 내보내기' : '🚀 MP4로 내보내기'}
+          {exporting ? '만드는 중…' : result ? `🎬 다시 만들기 (${format})` : `🚀 ${format}로 내보내기`}
         </button>
-        {exporting ? <ProgressBar value={progress} label={message || '렌더링 중'} /> : null}
+        {exporting ? (
+          <div className="space-y-1.5">
+            <ProgressBar value={progress} label={message || '영상 만드는 중'} />
+            <button type="button" className="btn-ghost w-full !py-1.5 text-[11px]" onClick={onCancel}>
+              ✕ 취소
+            </button>
+          </div>
+        ) : null}
         {error ? (
           <p className="rounded-lg border border-neon-rose/40 bg-neon-rose/10 px-2.5 py-2 text-[11px] text-neon-rose">{error}</p>
         ) : null}
         {result ? (
           <div className="space-y-2">
             <video
-              key={result.downloadUrl}
-              src={result.playUrl}
+              key={result.url}
+              src={result.url}
               controls
               playsInline
               className="w-full rounded-lg border border-studio-700 bg-black"
@@ -107,17 +115,17 @@ export default function ExportPanel({
               <span>
                 {result.width}×{result.height} · {result.duration.toFixed(2)}초 · {formatBytes(result.sizeBytes)}
               </span>
-              <span className="text-studio-500">렌더 {result.elapsedSec.toFixed(1)}초</span>
+              <span className="text-studio-500">만드는 데 {result.elapsedSec.toFixed(1)}초</span>
             </div>
-            <a className="btn-ghost w-full" href={result.downloadUrl} download={result.fileName}>
+            <a className="btn-ghost w-full" href={result.url} download={result.fileName}>
               ⬇️ {result.fileName} 내려받기
             </a>
-            {jobId ? <p className="text-center text-[10px] text-studio-500">job {jobId}</p> : null}
           </div>
         ) : null}
         <p className="text-[10px] leading-relaxed text-studio-500">
-          렌더링은 서버에서 진행됩니다. 미리보기와 같은 폰트 파일·같은 좌표 계산을 쓰기 때문에 결과물이 미리보기와 일치합니다.
-          (필요한 인물만 골라 가릴 수 있고, 자막 스타일도 그대로 적용됩니다.)
+          서버 없이 <b className="text-studio-300">이 브라우저에서</b> 미리보기와 같은 폰트·같은 좌표로 한 프레임씩 합성합니다.
+          실제 재생 속도로 만들어지기 때문에 영상 길이만큼 시간이 걸리고, 그동안 이 탭을 다른 곳으로 전환하면 느려질 수 있어요.
+          {format === 'WebM' ? ' 이 브라우저는 MP4 녹화를 지원하지 않아 WebM으로 저장됩니다(유튜브·인스타 업로드 가능).' : ''}
         </p>
       </Section>
     </div>

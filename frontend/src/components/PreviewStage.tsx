@@ -165,7 +165,7 @@ export default function PreviewStage({
           >
             <video
               ref={videoRef}
-              src={`/api/projects/${project.id}/video`}
+              src={project.srcUrl}
               playsInline
               muted={false}
               preload="auto"
